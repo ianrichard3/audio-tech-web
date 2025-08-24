@@ -17,7 +17,7 @@ const cells = [
   {id: "in4", name: "Entrada 4", description: "Aca va la clave"},
   {id: "in5", name: "Entrada 5", description: "Aca va la clave"},
   {id: "in6", name: "Entrada 6", description: "Aca va la clave"},
-    {id: "off7", name: "", description: ""},
+  {id: "off7", name: "", description: ""},
   {id: "off8", name: "", description: ""},
   {id: "off9", name: "", description: ""},
   {id: "off10", name: "", description: ""},
@@ -53,7 +53,7 @@ const handleCellPress = (cellId: string, isActive: boolean) => {
     activeColor="#2563eb"
     centerBg="#e5e7eb"
     borderColor="#cbd5e1"
-    @cell-press="(k, on) => console.log('cell-press', k, on)"
+    @cell-press="handleCellPress"
     @change="(v) => console.log('change', v)"
     @change-order="handleOrderChange"
   />
