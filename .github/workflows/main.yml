@@ -43,24 +43,24 @@ jobs:
 
       - name: Desplegar con Docker Compose en el VPS
         run: |
-            ssh -o StrictHostKeyChecking=no -i key.pem -p "$PI_SSH_PORT" "$PI_USER@$PI_HOST" \
-              "REMOTE_PATH='${REMOTE_PATH}' bash -s" <<'EOF'
-        set -e
-        echo "Conectado al VPS"
-        cd "$REMOTE_PATH"
-        echo "Directorio actual de trabajo: $(pwd)"
+          ssh -o StrictHostKeyChecking=no -i key.pem -p "$PI_SSH_PORT" "$PI_USER@$PI_HOST" \
+            "REMOTE_PATH='${REMOTE_PATH}' bash -s" <<'EOF'
+      set -e
+      echo "Conectado al VPS"
+      cd "$REMOTE_PATH"
+      echo "Directorio actual de trabajo: $(pwd)"
 
-        echo "Deteniendo contenedores..."
-        docker compose down || true
+      echo "Deteniendo contenedores..."
+      docker compose down || true
 
-        echo "Levantando con build..."
-        docker compose up -d --build
+      echo "Levantando con build..."
+      docker compose up -d --build
 
-        echo "Limpieza de imágenes no utilizadas..."
-        docker image prune -f || true
+      echo "Limpieza de imágenes no utilizadas..."
+      docker image prune -f || true
 
-        echo "✅ Despliegue completado."
-        EOF
+      echo "✅ Despliegue completado."
+      EOF
           env:
             PI_HOST: ${{ secrets.PI_HOST }}
             PI_USER: ${{ secrets.PI_USER }}
