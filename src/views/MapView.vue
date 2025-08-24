@@ -7,7 +7,7 @@ const active = ref<string[]>([])
 import { cells } from '../data/mockCells'
 
 // Solo estas IDs serán presionables
-const pressableCells = cells.filter(c => c.id.startsWith("in")).map(c => c.id)
+// const pressableCells = cells.filter(c => c.id.startsWith("in")).map(c => c.id)
 
 const handleOrderChange = (newOrder: string[]) => {
   console.log('Nuevo orden:', newOrder)
