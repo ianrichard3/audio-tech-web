@@ -8,6 +8,8 @@
         <router-link to="/map" class="nav-link">Map</router-link>
         <span class="nav-separator">|</span>
         <router-link to="/about" class="nav-link">About</router-link>
+        <span class="nav-separator">|</span>
+        <router-link to="/calculator" class="nav-link">Calculator</router-link>
       </nav>
     </header>
     <main class="main-content">
