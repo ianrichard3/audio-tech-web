@@ -47,6 +47,8 @@ jobs:
           set -e
           cd "$REMOTE_PATH"
 
+          echo "Directorio actual de trabajo: $(pwd)"
+
           echo "Deteniendo contenedores..."
           docker compose down || true
 
