@@ -17,7 +17,7 @@ const props = withDefaults(defineProps<{
     :aria-disabled="!props.pressable"
   >
     <span class="cell-name">{{ props.name }}</span>
-    <div class="tooltip">
+    <div v-if="props.pressable" class="tooltip">
       <h4>{{ props.name }}</h4>
       <p>{{ props.description }}</p>
     </div>

@@ -33,6 +33,8 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   readonly?: boolean
 
+  multiSelect?: boolean
+
   /** Permitir drag & drop de reordenamiento */
   draggable?: boolean
 }>(), {
@@ -49,7 +51,8 @@ const props = withDefaults(defineProps<{
   borderColor: '#cbd5e1',
   disabled: false,
   readonly: false,
-  draggable: true
+  draggable: true,
+  multiSelect: false
 })
 
 const emit = defineEmits<{
@@ -154,13 +157,21 @@ function onDrop(e: DragEvent, toId: Key) {
 /** Toggle */
 function onPressCell(id: Key) {
   if (props.disabled || props.readonly || !isPressable(id)) return
-  const next = new Set(active.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  const arr = Array.from(next)
-  active.value = arr
-  emit('cell-press', id, next.has(id))
-  emit('change', arr)
+  if (props.multiSelect) {
+    const next = new Set(active.value)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    const arr = Array.from(next)
+    active.value = arr
+    emit('cell-press', id, next.has(id))
+    emit('change', arr)
+  } else {
+    // Solo uno activo
+    const arr = active.value[0] === id ? [] : [id]
+    active.value = arr
+    emit('cell-press', id, arr.length > 0)
+    emit('change', arr)
+  }
 }
 
 function onKeyToggle(e: KeyboardEvent, id: Key) {

@@ -5,35 +5,51 @@ import GenericGrid from '../components/GenericGrid.vue'
 const active = ref<string[]>([])
 
 const cells = [
-  { id: 'tl',     name: 'TL',     description: 'Arriba izquierda' },
-  { id: 'tr',     name: 'TR',     description: 'Arriba derecha' },
-  { id: 'center', name: 'Center', description: 'Centro no presionable' },
-  { id: 'bl',     name: 'BL',     description: 'Abajo izquierda' },
-  { id: 'br',     name: 'BR',     description: 'Abajo derecha' },
-  { id: 'c1',     name: 'C1',     description: 'Extra 1' },
-  { id: 'c2',     name: 'C2',     description: 'Extra 2' },
-  { id: 'c3',     name: 'C3',     description: 'Extra 3' },
-  { id: 'c4',     name: 'C4',     description: 'Extra 4' }
+  {id: "off1", name: "", description: ""},
+  {id: "off2", name: "", description: ""},
+  {id: "off3", name: "", description: ""},
+  {id: "off4", name: "", description: ""},
+  {id: "off5", name: "", description: ""},
+  {id: "off6", name: "", description: ""},
+  {id: "in1", name: "Entrada 1", description: "Aca va la clave"},
+  {id: "in2", name: "Entrada 2", description: "Aca va la clave"},
+  {id: "in3", name: "Entrada 3", description: "Aca va la clave"},
+  {id: "in4", name: "Entrada 4", description: "Aca va la clave"},
+  {id: "in5", name: "Entrada 5", description: "Aca va la clave"},
+  {id: "in6", name: "Entrada 6", description: "Aca va la clave"},
+    {id: "off7", name: "", description: ""},
+  {id: "off8", name: "", description: ""},
+  {id: "off9", name: "", description: ""},
+  {id: "off10", name: "", description: ""},
+  {id: "off11", name: "", description: ""},
+  {id: "off12", name: "", description: ""}
+
 ]
 
 // Solo estas IDs serán presionables
-const pressableCells = ['tl', 'tr', 'bl', 'br']
+const pressableCells = cells.filter(c => c.id.startsWith("in")).map(c => c.id)
 
-function handleOrderChange(newOrder: string[]) {
+const handleOrderChange = (newOrder: string[]) => {
   console.log('Nuevo orden:', newOrder)
 }
+
+const handleCellPress = (cellId: string, isActive: boolean) => {
+  console.log('Cell pressed:', cellId, 'Active:', isActive)
+}
+
 </script>
 
 <template>
   <GenericGrid
     v-model="active"
     :rows="3"
-    :cols="3"
+    :cols="6"
     :cells="cells"
     :pressableCells="pressableCells"
-    :boardWidth="500"
-    :boardHeight="500"
+    :boardWidth="600"
+    :boardHeight="300"
     :gap="8"
+    :multi-select="false"
     activeColor="#2563eb"
     centerBg="#e5e7eb"
     borderColor="#cbd5e1"
@@ -41,9 +57,4 @@ function handleOrderChange(newOrder: string[]) {
     @change="(v) => console.log('change', v)"
     @change-order="handleOrderChange"
   />
-
-  <pre style="margin-top:12px; background:#f8fafc; border:1px solid #e5e7eb; padding:.5rem; border-radius:.5rem;">
-Activos:
-{{ JSON.stringify(active, null, 2) }}
-  </pre>
 </template>
