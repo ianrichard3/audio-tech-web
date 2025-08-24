@@ -43,10 +43,12 @@ jobs:
 
       - name: Desplegar con Docker Compose en el VPS
         run: |
-          ssh -o StrictHostKeyChecking=no -i key.pem -p "$PI_SSH_PORT" "$PI_USER@$PI_HOST" << 'EOF'
+          ssh -o StrictHostKeyChecking=no -i key.pem -p "$PI_SSH_PORT" "$PI_USER@$PI_HOST" REMOTE_PATH="$REMOTE_PATH" << 'EOF'
           set -e
-          cd "$REMOTE_PATH"
 
+          echo "Conectado al VPS"
+
+          cd "$REMOTE_PATH"
           echo "Directorio actual de trabajo: $(pwd)"
 
           echo "Deteniendo contenedores..."
@@ -64,7 +66,7 @@ jobs:
           PI_HOST: ${{ secrets.PI_HOST }}
           PI_USER: ${{ secrets.PI_USER }}
           PI_SSH_PORT: ${{ secrets.PI_SSH_PORT }}
-          # hereda REMOTE_PATH de 'env' del job
+          REMOTE_PATH: ${{ env.REMOTE_PATH }}
 
       - name: Limpiar clave local
         if: always()
