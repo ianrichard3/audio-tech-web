@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: vue-web
     ports:
-      - "80:3000"      # expone 80 del VPS -> 3000 dentro del contenedor
+      - "8080:3000"      # expone 8080 del VPS -> 3000 dentro del contenedor
     restart: unless-stopped
     environment:
       - PORT=3000
