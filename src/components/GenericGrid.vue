@@ -83,7 +83,8 @@ const cellMatrix = ref<CellData[][]>([])
 
 // Generador simple si faltan celdas
 let autoId = 1
-const genAuto = (): CellData => ({ id: `auto-${autoId++}`, name: `Cell ${autoId}`, description: `Celda ${autoId}` })
+// const genAuto = (): CellData => ({ id: `auto-${autoId++}`, name: `Cell ${autoId}`, description: `Celda ${autoId}` })
+const genAuto = (): CellData => ({ id: `auto-${autoId++}`, name: "", description: "" })
 
 function initMatrix() {
   const needed = props.rows * props.cols

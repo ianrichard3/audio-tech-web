@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
     :class="{ active: props.active, 'non-pressable': !props.pressable }"
     :aria-disabled="!props.pressable"
   >
-    <span class="cell-name">{{ props.name }}</span>
+    <span class="cell-name">{{ props.name.length > 5 ? props.name.slice(0, 5) + '...' : props.name }}</span>
     <div v-if="props.pressable" class="tooltip">
       <h4>{{ props.name }}</h4>
       <p>{{ props.description }}</p>
@@ -31,8 +31,6 @@ const props = withDefaults(defineProps<{
   align-items: center;
   justify-content: center;
 
-  width: 100px;
-  height: 100px;
 
   background: #ffffff;
   border: 1px solid #cbd5e1;
