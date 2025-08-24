@@ -4,7 +4,7 @@ import GenericGrid from '../components/GenericGrid.vue'
 
 const active = ref<string[]>([])
 
-import { cells } from '../data/mockCells'
+import { cells } from '../data/mockCells.ts'
 
 // Solo estas IDs serán presionables
 // const pressableCells = cells.filter(c => c.id.startsWith("in")).map(c => c.id)
