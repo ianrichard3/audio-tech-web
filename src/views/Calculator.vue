@@ -16,12 +16,12 @@ const valorConDescuento = computed(() =>
   <div class="home-container">
     <div class="calculator-card">
       <h2 class="calculator-title">
-        Calculadora de compra
+        Purchase Calculator
       </h2>
 
       <div class="form-group">
         <label>
-          <span>Precio:</span>
+          <span>Price:</span>
           <input
             type="number"
             v-model.number="precio"
@@ -30,7 +30,7 @@ const valorConDescuento = computed(() =>
         </label>
 
         <label>
-          <span>Cantidad:</span>
+          <span>Quantity:</span>
           <input
             type="number"
             v-model.number="cantidad"
@@ -39,7 +39,7 @@ const valorConDescuento = computed(() =>
         </label>
 
         <label>
-          <span>Descuento (%):</span>
+          <span>Discount (%):</span>
           <input
             type="number"
             v-model.number="descuento"

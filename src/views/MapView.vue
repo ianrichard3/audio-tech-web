@@ -22,8 +22,8 @@ const handleCellPress = (cellId: string, isActive: boolean) => {
 <template>
   <GenericGrid
     v-model="active"
-    :rows="6"
-    :cols="32"
+    :rows="2"
+    :cols="4"
     :cells="cells"
     :pressableCells="'all'"
     :boardWidth="1800"
