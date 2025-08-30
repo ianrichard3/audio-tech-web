@@ -2,8 +2,8 @@
 
 <template>
 
-  <h1>Bienvenido</h1>
-  <p>Utiliza el menú para navegar a las diferentes secciones.</p>
+  <h1>Welcome</h1>
+  <p>Use the menu to navigate to different sections.</p>
 
 </template>
 

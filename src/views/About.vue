@@ -1,7 +1,7 @@
 <template>
   <div class="about-container">
     <h2 class="about-title">About</h2>
-    <p class="about-desc">Esta es una app súper liviana hecha con Vue + Vite.</p>
+    <p class="about-desc">This is a wonderful app.</p>
   </div>
 </template>
 

@@ -1,19 +1,21 @@
 <template>
   <div class="app-root">
     <header class="main-header">
-      <h1 class="header-title">🌿 Vue en Mano</h1>
+      <h1 class="header-title">Pepper</h1>
       <nav class="header-nav">
         <router-link to="/" class="nav-link">Home</router-link>
         <span class="nav-separator">|</span>
         <router-link to="/map" class="nav-link">Map</router-link>
         <span class="nav-separator">|</span>
-        <router-link to="/about" class="nav-link">About</router-link>
-        <span class="nav-separator">|</span>
         <router-link to="/calculator" class="nav-link">Calculator</router-link>
+        <span class="nav-separator">|</span>
+        <router-link to="/connections" class="nav-link">Connections</router-link>
+        <span class="nav-separator">|</span>
+        <router-link to="/about" class="nav-link">About</router-link>
       </nav>
     </header>
     <main class="main-content">
-      <router-view /> <!-- Aquí se renderiza la página -->
+      <router-view />
     </main>
   </div>
 </template>
