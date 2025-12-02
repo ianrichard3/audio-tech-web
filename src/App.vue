@@ -1,72 +1,82 @@
+<script setup lang="ts">
+import PatchBayGrid from './components/PatchBayGrid.vue'
+import DevicesManager from './components/DevicesManager.vue'
+import { store } from './store'
+</script>
+
 <template>
-  <div class="app-root">
-    <header class="main-header">
-      <h1 class="header-title">Pepper</h1>
-      <nav class="header-nav">
-        <router-link to="/" class="nav-link">Home</router-link>
-        <span class="nav-separator">|</span>
-        <router-link to="/map" class="nav-link">Map</router-link>
-        <span class="nav-separator">|</span>
-        <router-link to="/calculator" class="nav-link">Calculator</router-link>
-        <span class="nav-separator">|</span>
-        <router-link to="/connections" class="nav-link">Connections</router-link>
-        <span class="nav-separator">|</span>
-        <router-link to="/about" class="nav-link">About</router-link>
-      </nav>
-    </header>
-    <main class="main-content">
-      <router-view />
+  <div class="app-container">
+    <nav class="main-nav">
+      <button 
+        :class="{ active: store.activeTab === 'patchbay' }" 
+        @click="store.setTab('patchbay')"
+      >
+        Patchbay
+      </button>
+      <button 
+        :class="{ active: store.activeTab === 'devices' }" 
+        @click="store.setTab('devices')"
+      >
+        Devices
+      </button>
+    </nav>
+
+    <main class="content-area">
+      <PatchBayGrid v-if="store.activeTab === 'patchbay'" />
+      <DevicesManager v-if="store.activeTab === 'devices'" />
     </main>
   </div>
 </template>
 
-<style scoped>
-.app-root {
-  min-height: 100vh;
-  width: 100vw;
-  background: linear-gradient(120deg, #e0f2fe 0%, #f6f8fa 100%);
+<style>
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #1a202c;
+  color: #e2e8f0;
 }
-.main-header {
-  background: #2563eb;
-  color: #fff;
-  padding: 2rem 0 1.5rem 0;
-  text-align: center;
-  border-radius: 0 0 1.5rem 1.5rem;
-  box-shadow: 0 2px 16px rgba(56,189,248,0.10);
-  margin-bottom: 2rem;
-}
-.header-title {
-  font-size: 2.2rem;
-  font-weight: 700;
-  margin-bottom: 1rem;
-}
-.header-nav {
-  display: flex;
-  justify-content: center;
-  gap: 1.5rem;
-  font-size: 1.1rem;
-}
-.nav-link {
-  color: #fff;
-  text-decoration: none;
-  font-weight: 500;
-  padding: 0.3rem 0.8rem;
-  border-radius: 0.5rem;
-  transition: background 0.2s, color 0.2s;
-}
-.nav-link:hover {
-  background: rgba(255,255,255,0.18);
-  color: #e0f2fe;
-}
-.nav-separator {
-  color: #e0f2fe;
-  font-weight: bold;
-}
-.main-content {
+
+.app-container {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  min-height: 70vh;
-  padding: 2rem 0;
+  height: 100vh;
+}
+
+.main-nav {
+  background-color: #2d3748;
+  padding: 0 20px;
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #4a5568;
+}
+
+.main-nav button {
+  background-color: transparent;
+  border: none;
+  color: #a0aec0;
+  padding: 15px 20px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s;
+}
+
+.main-nav button:hover {
+  color: #e2e8f0;
+  background-color: #364156;
+}
+
+.main-nav button.active {
+  color: #63b3ed;
+  border-bottom-color: #63b3ed;
+  background-color: #283141;
+}
+
+.content-area {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
 }
 </style>
