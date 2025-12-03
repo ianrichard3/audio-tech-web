@@ -109,8 +109,10 @@ const connectionResult = computed(() => {
 })
 
 // Highlight these patches in the patchbay
-const highlightedPatches = computed(() => {
-  if (connectionResult.value?.type === 'success') {
+const highlightedPatches = computed((): number[] => {
+  if (connectionResult.value?.type === 'success' && 
+      connectionResult.value.patchA !== undefined && 
+      connectionResult.value.patchB !== undefined) {
     return [connectionResult.value.patchA, connectionResult.value.patchB]
   }
   return []
