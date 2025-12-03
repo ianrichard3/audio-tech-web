@@ -216,7 +216,7 @@ const handleUnlinkPort = async (port: DevicePort) => {
 
     <!-- Add Device Modal -->
     <div v-if="showAddModal" class="modal-overlay" @click="showAddModal = false">
-      <div class="modal-content small" @click.stop>
+      <div class="modal-content small add-device-modal" @click.stop>
         <div class="modal-header">
           <h2>Add New Device</h2>
           <button class="close-btn" @click="showAddModal = false">×</button>
@@ -237,8 +237,11 @@ const handleUnlinkPort = async (port: DevicePort) => {
               <option>Other</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Ports</label>
+          <div class="form-group ports-section">
+            <div class="ports-header">
+              <label>Ports</label>
+              <button class="add-port-btn" @click="addPort">+ Add Port</button>
+            </div>
             <div class="ports-editor">
               <div v-for="(port, index) in newPorts" :key="index" class="port-edit-row">
                 <input v-model="port.label" placeholder="Port name" class="port-name-input" />
@@ -249,9 +252,13 @@ const handleUnlinkPort = async (port: DevicePort) => {
                 </select>
                 <button class="remove-port-btn" @click="removePort(index)">×</button>
               </div>
-              <button class="add-port-btn" @click="addPort">+ Add Port</button>
+              <div v-if="newPorts.length === 0" class="ports-empty">
+                No hay puertos agregados
+              </div>
             </div>
           </div>
+        </div>
+        <div class="form-footer">
           <button class="save-btn" @click="handleAddDevice" :disabled="!newDevice.name || newPorts.length === 0">Create Device</button>
         </div>
       </div>
@@ -375,6 +382,30 @@ const handleUnlinkPort = async (port: DevicePort) => {
 
 .modal-content.small {
   max-width: 400px;
+}
+
+.modal-content.add-device-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content.add-device-modal .form-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-footer {
+  padding: 15px 20px;
+  border-top: 1px solid #4a5568;
+  background-color: #2d3748;
+}
+
+.form-footer .save-btn {
+  width: 100%;
+  margin-top: 0;
 }
 
 .modal-header {
@@ -555,6 +586,61 @@ const handleUnlinkPort = async (port: DevicePort) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ports-editor::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ports-editor::-webkit-scrollbar-track {
+  background: #1a202c;
+  border-radius: 3px;
+}
+
+.ports-editor::-webkit-scrollbar-thumb {
+  background: #4a5568;
+  border-radius: 3px;
+}
+
+.ports-editor::-webkit-scrollbar-thumb:hover {
+  background: #718096;
+}
+
+.ports-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ports-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ports-header label {
+  margin: 0;
+}
+
+.ports-header .add-port-btn {
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.ports-empty {
+  color: #718096;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+  background-color: #1a202c;
+  border-radius: 4px;
+  border: 1px dashed #4a5568;
 }
 
 .port-edit-row {

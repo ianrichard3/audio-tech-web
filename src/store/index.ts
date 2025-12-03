@@ -28,9 +28,10 @@ export const store = reactive({
   devices: [] as Device[],
   loading: false,
   error: null as string | null,
-  activeTab: 'devices', // 'patchbay' | 'devices'
+  activeTab: 'devices', // 'patchbay' | 'devices' | 'connections'
   selectionMode: false,
   pendingLinkPortId: null as string | null, // The port waiting to be linked (from Device -> Patchbay flow)
+  highlightedPatchIds: [] as number[], // For connection finder highlighting
   
   // Load data from Supabase
   async loadData() {
