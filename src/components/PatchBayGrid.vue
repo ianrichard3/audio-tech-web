@@ -34,6 +34,10 @@ const isMatch = (node: PatchBayNode) => {
   return false
 }
 
+const isHighlightedConnection = (patchbayId: number) => {
+  return store.highlightedPatchIds.includes(patchbayId)
+}
+
 const handleCellClick = async (node: PatchBayNode) => {
   if (store.selectionMode) {
     // We are in "Link Mode" coming from Devices tab
@@ -93,6 +97,11 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
         <button @click="store.cancelLinking()">Cancel</button>
       </div>
 
+      <div v-if="store.highlightedPatchIds.length > 0" class="highlight-banner">
+        🔌 Mostrando conexión: <strong>#{{ store.highlightedPatchIds[0] }}</strong> ↔ <strong>#{{ store.highlightedPatchIds[1] }}</strong>
+        <button @click="store.highlightedPatchIds = []">Limpiar</button>
+      </div>
+
       <div class="grid-controls">
         <input 
           v-model="gridSearchQuery" 
@@ -110,7 +119,8 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
           class="grid-cell"
           :class="{ 
             'linked': isLinked(item.id),
-            'highlight-match': isMatch(item)
+            'highlight-match': isMatch(item),
+            'highlight-connection': isHighlightedConnection(item.id)
           }"
           @click="handleCellClick(item)"
         >
@@ -224,6 +234,39 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
   cursor: pointer;
 }
 
+.highlight-banner {
+  background: linear-gradient(135deg, #d53f8c, #ed64a6);
+  color: white;
+  padding: 10px 20px;
+  text-align: center;
+  font-weight: 500;
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  box-shadow: 0 4px 15px rgba(213, 63, 140, 0.4);
+}
+
+.highlight-banner strong {
+  font-size: 1.1rem;
+}
+
+.highlight-banner button {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.highlight-banner button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 .grid-controls {
   display: flex;
   justify-content: center;
@@ -283,6 +326,32 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
   border-color: #fbd38d !important;
   box-shadow: 0 0 5px #ed8936;
   z-index: 1;
+}
+
+.grid-cell.highlight-connection {
+  background-color: #d53f8c !important; /* Magenta/Pink highlight for connection finder */
+  border-color: #fbb6ce !important;
+  box-shadow: 0 0 15px #d53f8c, 0 0 30px #d53f8c, 0 0 45px #ed64a6;
+  z-index: 10;
+  animation: connection-pulse 0.8s ease-in-out infinite;
+  transform: scale(1.3);
+  border-width: 2px;
+}
+
+.grid-cell.highlight-connection .cell-text {
+  font-weight: bold;
+  font-size: 0.75rem;
+}
+
+@keyframes connection-pulse {
+  0%, 100% {
+    box-shadow: 0 0 15px #d53f8c, 0 0 30px #d53f8c, 0 0 45px #ed64a6;
+    transform: scale(1.3);
+  }
+  50% {
+    box-shadow: 0 0 20px #ed64a6, 0 0 40px #ed64a6, 0 0 60px #f687b3;
+    transform: scale(1.4);
+  }
 }
 
 .cell-text {

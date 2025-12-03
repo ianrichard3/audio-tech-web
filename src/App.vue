@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import PatchBayGrid from './components/PatchBayGrid.vue'
 import DevicesManager from './components/DevicesManager.vue'
+import ConnectionFinder from './components/ConnectionFinder.vue'
 import { store } from './store'
 
 onMounted(() => {
@@ -35,11 +36,18 @@ onMounted(() => {
       >
         Devices
       </button>
+      <button 
+        :class="{ active: store.activeTab === 'connections' }" 
+        @click="store.setTab('connections')"
+      >
+        Connections
+      </button>
     </nav>
 
     <main class="content-area">
       <PatchBayGrid v-if="store.activeTab === 'patchbay'" />
       <DevicesManager v-if="store.activeTab === 'devices'" />
+      <ConnectionFinder v-if="store.activeTab === 'connections'" />
     </main>
   </div>
 </template>
