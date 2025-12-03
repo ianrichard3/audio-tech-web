@@ -34,7 +34,7 @@ const isMatch = (node: PatchBayNode) => {
   return false
 }
 
-const handleCellClick = (node: PatchBayNode) => {
+const handleCellClick = async (node: PatchBayNode) => {
   if (store.selectionMode) {
     // We are in "Link Mode" coming from Devices tab
     // Check if already occupied?
@@ -44,7 +44,7 @@ const handleCellClick = (node: PatchBayNode) => {
         return
       }
     }
-    store.completeLink(node.id)
+    await store.completeLink(node.id)
   } else {
     // Normal mode: show details
     selectedCell.value = node
@@ -57,11 +57,11 @@ const closePopup = () => {
   searchQuery.value = ''
 }
 
-const handleUnlink = () => {
+const handleUnlink = async () => {
   if (selectedCell.value) {
     const connection = getConnection(selectedCell.value.id)
     if (connection) {
-      store.unlinkPort(connection.device.id, connection.port.id)
+      await store.unlinkPort(connection.device.id, connection.port.id)
     }
   }
 }
@@ -77,9 +77,9 @@ const filteredDevices = computed(() => {
   return store.devices.filter(d => d.name.toLowerCase().includes(query))
 })
 
-const selectDeviceForLink = (device: Device, port: DevicePort) => {
+const selectDeviceForLink = async (device: Device, port: DevicePort) => {
   if (selectedCell.value) {
-    store.linkPatchbayToDevice(selectedCell.value.id, device.id, port.id)
+    await store.linkPatchbayToDevice(selectedCell.value.id, device.id, port.id)
     closePopup()
   }
 }

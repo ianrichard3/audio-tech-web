@@ -1,4 +1,4 @@
-﻿name: CI/CD - Raspberry Deploy (no git on VPS)
+﻿name: CD - Deploy
 
 on:
   workflow_dispatch:
