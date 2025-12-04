@@ -39,50 +39,12 @@ export const store = reactive({
     this.error = null
     
     try {
-      // Load patchbay points
-      const { data: patchbayData, error: patchbayError } = await supabase
-        .from('patchbay_points')
-        .select('*')
-        .order('id')
+      const { data, error } = await supabase.rpc('get_all_data')
       
-      if (patchbayError) throw patchbayError
+      if (error) throw error
       
-      this.patchbayNodes = patchbayData.map(p => ({
-        id: p.id,
-        name: p.name,
-        description: p.description || '',
-        type: p.type
-      }))
-      
-      // Load devices
-      const { data: devicesData, error: devicesError } = await supabase
-        .from('devices')
-        .select('*')
-        .order('id')
-      
-      if (devicesError) throw devicesError
-      
-      // Load ports
-      const { data: portsData, error: portsError } = await supabase
-        .from('ports')
-        .select('*')
-      
-      if (portsError) throw portsError
-      
-      // Combine devices with their ports
-      this.devices = devicesData.map(device => ({
-        id: device.id,
-        name: device.name,
-        type: device.type,
-        ports: portsData
-          .filter(port => port.device_id === device.id)
-          .map(port => ({
-            id: port.id,
-            label: port.label,
-            type: port.type as 'Input' | 'Output' | 'Other',
-            patchbayId: port.patchbay_id
-          }))
-      }))
+      this.patchbayNodes = data.patchbay_points
+      this.devices = data.devices
       
     } catch (err: any) {
       this.error = err.message
@@ -107,25 +69,25 @@ export const store = reactive({
   async completeLink(patchbayId: number) {
     if (!this.pendingLinkPortId) return
     
-    // Find device and port
-    for (const device of this.devices) {
-      const port = device.ports.find(p => p.id === this.pendingLinkPortId)
-      if (port) {
-        // Update in Supabase
-        const { error } = await supabase
-          .from('ports')
-          .update({ patchbay_id: patchbayId })
-          .eq('id', port.id)
-        
-        if (error) {
-          console.error('Error linking port:', error)
-          return
+    try {
+      const { data, error } = await supabase.rpc('link_port', {
+        p_port_id: this.pendingLinkPortId,
+        p_patchbay_id: patchbayId
+      })
+      
+      if (error) throw error
+      
+      // Update local state
+      for (const device of this.devices) {
+        const port = device.ports.find(p => p.id === this.pendingLinkPortId)
+        if (port) {
+          port.patchbayId = data.patchbayId
+          break
         }
-        
-        // Update local state
-        port.patchbayId = patchbayId
-        break
       }
+    } catch (err: any) {
+      console.error('Error linking port:', err)
+      return
     }
     
     this.cancelLinking()
@@ -139,105 +101,86 @@ export const store = reactive({
   
   // Flow: Patchbay -> Device (Unlink or Link via Search)
   async unlinkPort(deviceId: number, portId: string) {
-    const device = this.devices.find(d => d.id === deviceId)
-    if (device) {
-      const port = device.ports.find(p => p.id === portId)
-      if (port) {
-        // Update in Supabase
-        const { error } = await supabase
-          .from('ports')
-          .update({ patchbay_id: null })
-          .eq('id', portId)
-        
-        if (error) {
-          console.error('Error unlinking port:', error)
-          return
+    try {
+      const { error } = await supabase.rpc('unlink_port', {
+        p_port_id: portId
+      })
+      
+      if (error) throw error
+      
+      // Update local state
+      const device = this.devices.find(d => d.id === deviceId)
+      if (device) {
+        const port = device.ports.find(p => p.id === portId)
+        if (port) {
+          port.patchbayId = null
         }
-        
-        port.patchbayId = null
       }
+    } catch (err: any) {
+      console.error('Error unlinking port:', err)
     }
   },
 
   // Link a specific port to a patchbay ID (used from the Patchbay search modal)
   async linkPatchbayToDevice(patchbayId: number, deviceId: number, portId: string) {
-    const device = this.devices.find(d => d.id === deviceId)
-    if (device) {
-      const port = device.ports.find(p => p.id === portId)
-      if (port) {
-        // Check if patchbayId is already taken by another port
-        const existing = this.getDeviceByPatchbayId(patchbayId)
-        if (existing) {
-          // Unlink the existing port first
-          const { error: unlinkError } = await supabase
-            .from('ports')
-            .update({ patchbay_id: null })
-            .eq('id', existing.port.id)
-          
-          if (unlinkError) {
-            console.error('Error unlinking existing port:', unlinkError)
-            return
+    try {
+      const { data, error } = await supabase.rpc('link_patchbay_to_device', {
+        p_patchbay_id: patchbayId,
+        p_port_id: portId
+      })
+      
+      if (error) throw error
+      
+      // Update local state - unlink old port if there was one
+      if (data.unlinkedPortId) {
+        for (const device of this.devices) {
+          const oldPort = device.ports.find(p => p.id === data.unlinkedPortId)
+          if (oldPort) {
+            oldPort.patchbayId = null
+            break
           }
-          
-          existing.port.patchbayId = null
         }
-
-        // Update in Supabase
-        const { error } = await supabase
-          .from('ports')
-          .update({ patchbay_id: patchbayId })
-          .eq('id', portId)
-        
-        if (error) {
-          console.error('Error linking port:', error)
-          return
-        }
-        
-        port.patchbayId = patchbayId
       }
+      
+      // Link new port
+      const device = this.devices.find(d => d.id === deviceId)
+      if (device) {
+        const port = device.ports.find(p => p.id === portId)
+        if (port) {
+          port.patchbayId = data.patchbayId
+        }
+      }
+    } catch (err: any) {
+      console.error('Error linking patchbay to device:', err)
     }
   },
   
   async addDevice(device: Omit<Device, 'id'>) {
     try {
-      // Insert device
-      const { data: newDevice, error: deviceError } = await supabase
-        .from('devices')
-        .insert({ name: device.name, type: device.type })
-        .select()
-        .single()
-      
-      if (deviceError) throw deviceError
-      
-      // Insert ports
-      if (device.ports.length > 0) {
-        const portsToInsert = device.ports.map((p, i) => ({
-          id: `dev-${newDevice.id}-port-${i + 1}`,
-          device_id: newDevice.id,
+      const { data, error } = await supabase.rpc('add_device', {
+        p_name: device.name,
+        p_type: device.type,
+        p_ports: device.ports.map(p => ({
           label: p.label,
           type: p.type,
-          patchbay_id: p.patchbayId
+          patchbayId: p.patchbayId
         }))
-        
-        const { error: portsError } = await supabase
-          .from('ports')
-          .insert(portsToInsert)
-        
-        if (portsError) throw portsError
-        
-        // Add to local state
-        this.devices.push({
-          id: newDevice.id,
-          name: newDevice.name,
-          type: newDevice.type,
-          ports: portsToInsert.map(p => ({
-            id: p.id,
-            label: p.label,
-            type: p.type as 'Input' | 'Output',
-            patchbayId: p.patchbay_id
-          }))
-        })
-      }
+      })
+      
+      if (error) throw error
+      
+      // Add to local state
+      this.devices.push({
+        id: data.id,
+        name: data.name,
+        type: data.type,
+        ports: data.ports.map(p => ({
+          id: p.id,
+          label: p.label,
+          type: p.type as 'Input' | 'Output' | 'Other',
+          patchbayId: p.patchbayId
+        }))
+      })
     } catch (err: any) {
       console.error('Error adding device:', err)
       throw err
@@ -246,11 +189,9 @@ export const store = reactive({
   
   async deleteDevice(id: number) {
     try {
-      // Ports will be deleted automatically (ON DELETE CASCADE)
-      const { error } = await supabase
-        .from('devices')
-        .delete()
-        .eq('id', id)
+      const { error } = await supabase.rpc('delete_device', {
+        p_device_id: id
+      })
       
       if (error) throw error
       
