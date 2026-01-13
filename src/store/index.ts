@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { supabase } from '@/lib/supabase'
+import { createDevice as createDeviceApi, deleteDevice as deleteDeviceApi, getState, linkPort, unlinkPort } from '@/lib/api'
 
 // Types
 export interface PatchBayNode {
@@ -33,18 +33,26 @@ export const store = reactive({
   pendingLinkPortId: null as string | null, // The port waiting to be linked (from Device -> Patchbay flow)
   highlightedPatchIds: [] as number[], // For connection finder highlighting
   
-  // Load data from Supabase
+  // Load data from API
   async loadData() {
     this.loading = true
     this.error = null
     
     try {
-      const { data, error } = await supabase.rpc('get_all_data')
-      
-      if (error) throw error
-      
+      const data = await getState()
+
       this.patchbayNodes = data.patchbay_points
-      this.devices = data.devices
+      this.devices = data.devices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        type: device.type,
+        ports: device.ports.map((port) => ({
+          id: port.id,
+          label: port.label,
+          type: port.type,
+          patchbayId: port.patchbay_id
+        }))
+      }))
       
     } catch (err: any) {
       this.error = err.message
@@ -70,18 +78,23 @@ export const store = reactive({
     if (!this.pendingLinkPortId) return
     
     try {
-      const { data, error } = await supabase.rpc('link_port', {
-        p_port_id: this.pendingLinkPortId,
-        p_patchbay_id: patchbayId
-      })
+      const data = await linkPort(this.pendingLinkPortId, patchbayId)
       
-      if (error) throw error
-      
+      if (data.unlinked_port_id) {
+        for (const device of this.devices) {
+          const oldPort = device.ports.find(p => p.id === data.unlinked_port_id)
+          if (oldPort) {
+            oldPort.patchbayId = null
+            break
+          }
+        }
+      }
+
       // Update local state
       for (const device of this.devices) {
         const port = device.ports.find(p => p.id === this.pendingLinkPortId)
         if (port) {
-          port.patchbayId = data.patchbayId
+          port.patchbayId = data.patchbay_id
           break
         }
       }
@@ -102,11 +115,7 @@ export const store = reactive({
   // Flow: Patchbay -> Device (Unlink or Link via Search)
   async unlinkPort(deviceId: number, portId: string) {
     try {
-      const { error } = await supabase.rpc('unlink_port', {
-        p_port_id: portId
-      })
-      
-      if (error) throw error
+      await unlinkPort(portId)
       
       // Update local state
       const device = this.devices.find(d => d.id === deviceId)
@@ -124,17 +133,12 @@ export const store = reactive({
   // Link a specific port to a patchbay ID (used from the Patchbay search modal)
   async linkPatchbayToDevice(patchbayId: number, deviceId: number, portId: string) {
     try {
-      const { data, error } = await supabase.rpc('link_patchbay_to_device', {
-        p_patchbay_id: patchbayId,
-        p_port_id: portId
-      })
-      
-      if (error) throw error
+      const data = await linkPort(portId, patchbayId)
       
       // Update local state - unlink old port if there was one
-      if (data.unlinkedPortId) {
+      if (data.unlinked_port_id) {
         for (const device of this.devices) {
-          const oldPort = device.ports.find(p => p.id === data.unlinkedPortId)
+          const oldPort = device.ports.find(p => p.id === data.unlinked_port_id)
           if (oldPort) {
             oldPort.patchbayId = null
             break
@@ -147,7 +151,7 @@ export const store = reactive({
       if (device) {
         const port = device.ports.find(p => p.id === portId)
         if (port) {
-          port.patchbayId = data.patchbayId
+          port.patchbayId = data.patchbay_id
         }
       }
     } catch (err: any) {
@@ -157,17 +161,15 @@ export const store = reactive({
   
   async addDevice(device: Omit<Device, 'id'>) {
     try {
-      const { data, error } = await supabase.rpc('add_device', {
-        p_name: device.name,
-        p_type: device.type,
-        p_ports: device.ports.map(p => ({
+      const data = await createDeviceApi({
+        name: device.name,
+        type: device.type,
+        ports: device.ports.map(p => ({
           label: p.label,
           type: p.type,
-          patchbayId: p.patchbayId
+          patchbay_id: p.patchbayId
         }))
       })
-      
-      if (error) throw error
       
       // Add to local state
       this.devices.push({
@@ -178,7 +180,7 @@ export const store = reactive({
           id: p.id,
           label: p.label,
           type: p.type as 'Input' | 'Output' | 'Other',
-          patchbayId: p.patchbayId
+          patchbayId: p.patchbay_id
         }))
       })
     } catch (err: any) {
@@ -189,11 +191,7 @@ export const store = reactive({
   
   async deleteDevice(id: number) {
     try {
-      const { error } = await supabase.rpc('delete_device', {
-        p_device_id: id
-      })
-      
-      if (error) throw error
+      await deleteDeviceApi(id)
       
       // Remove from local state
       const index = this.devices.findIndex(d => d.id === id)
