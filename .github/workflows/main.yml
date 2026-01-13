@@ -14,34 +14,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Preparar clave SSH y known_hosts
+      - name: Preparar clave SSH
         run: |
           mkdir -p ~/.ssh
           echo "$PI_SSH_PRIVATE_KEY" > key.pem
           chmod 600 key.pem
-
-          # Opcional pero recomendado: fijar la huella del host para evitar MITM
-          # Si no conocés la huella, podés mantener StrictHostKeyChecking=no como en tu versión anterior.
-          if [ -n "${PI_HOST}" ]; then
-            ssh-keyscan -p "${PI_SSH_PORT}" "${PI_HOST}" >> ~/.ssh/known_hosts 2>/dev/null || true
-          fi
         env:
-          PI_HOST: ${{ secrets.PI_HOST }}
-          PI_SSH_PORT: ${{ secrets.PI_SSH_PORT }}
           PI_SSH_PRIVATE_KEY: ${{ secrets.PI_SSH_PRIVATE_KEY }}
 
-      - name: Sincronizar archivos al VPS (sin .git)
-        run: |
-          rsync -az --delete \
-            --exclude ".git" \
-            -e "ssh -i key.pem -p ${PI_SSH_PORT} -o StrictHostKeyChecking=no" \
-            ./ "${PI_USER}@${PI_HOST}:${REMOTE_PATH}/"
-        env:
-          PI_HOST: ${{ secrets.PI_HOST }}
-          PI_USER: ${{ secrets.PI_USER }}
-          PI_SSH_PORT: ${{ secrets.PI_SSH_PORT }}
-
-      - name: Desplegar con Docker Compose en el VPS
+      - name: Pull y desplegar con Docker Compose en el VPS
         run: |
           ssh -o StrictHostKeyChecking=no -i key.pem -p "$PI_SSH_PORT" "$PI_USER@$PI_HOST" \
                 "REMOTE_PATH='${REMOTE_PATH}' bash -s" <<'EOF'
@@ -49,6 +30,9 @@ jobs:
           echo "Conectado al VPS"
           cd "$REMOTE_PATH"
           echo "Directorio actual de trabajo: $(pwd)"
+
+          echo "Haciendo git pull..."
+          git pull origin main
 
           echo "Deteniendo contenedores..."
           docker compose down || true
@@ -67,6 +51,8 @@ jobs:
           PI_USER: ${{ secrets.PI_USER }}
           PI_SSH_PORT: ${{ secrets.PI_SSH_PORT }}
           REMOTE_PATH: ${{ env.REMOTE_PATH }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
 
       - name: Limpiar clave local
         if: always()
