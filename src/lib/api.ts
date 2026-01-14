@@ -1,46 +1,7 @@
-const DEFAULT_API_URL = 'http://localhost:8000'
+// API client for Pepper backend
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8088'
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/$/, '')
-
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE'
-
-const buildUrl = (path: string) => {
-  if (!path.startsWith('/')) {
-    return `${apiBaseUrl}/${path}`
-  }
-  return `${apiBaseUrl}${path}`
-}
-
-const parseErrorMessage = async (response: Response) => {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    const data = await response.json()
-    if (typeof data?.detail === 'string') {
-      return data.detail
-    }
-    return JSON.stringify(data)
-  }
-  const text = await response.text()
-  return text || response.statusText
-}
-
-const apiRequest = async <T>(path: string, method: HttpMethod, body?: unknown) => {
-  const response = await fetch(buildUrl(path), {
-    method,
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  if (!response.ok) {
-    const message = await parseErrorMessage(response)
-    throw new Error(message || `Request failed with ${response.status}`)
-  }
-
-  return response.json() as Promise<T>
-}
-
+// API Types (snake_case from backend)
 export interface ApiPatchbayPoint {
   id: number
   name: string
@@ -62,16 +23,20 @@ export interface ApiDevice {
   ports: ApiPort[]
 }
 
-export interface ApiStateResponse {
+export interface ApiState {
   patchbay_points: ApiPatchbayPoint[]
   devices: ApiDevice[]
 }
 
-export interface ApiPortLinkResponse extends ApiPort {
-  unlinked_port_id: string | null
+export interface ApiPortLinkRequest {
+  patchbay_id: number
 }
 
-export interface ApiDeviceCreatePayload {
+export interface ApiPortLinkResponse extends ApiPort {
+  unlinked_port_id?: string | null
+}
+
+export interface ApiDeviceCreate {
   name: string
   type: string
   ports: Array<{
@@ -81,23 +46,67 @@ export interface ApiDeviceCreatePayload {
   }>
 }
 
-export const getState = () => apiRequest<ApiStateResponse>('/state', 'GET')
+// HTTP client
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const url = `${API_URL}${path}`
+  
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    })
 
-export const linkPort = (portId: string, patchbayId: number) =>
-  apiRequest<ApiPortLinkResponse>(`/ports/${portId}/link`, 'POST', {
-    patchbay_id: patchbayId
-  })
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    }
 
-export const unlinkPort = (portId: string) =>
-  apiRequest<ApiPort>(`/ports/${portId}/unlink`, 'POST')
+    return await response.json()
+  } catch (error) {
+    console.error(`API request failed: ${path}`, error)
+    throw error
+  }
+}
 
-export const updatePortPatchbay = (portId: string, patchbayId: number | null) =>
-  apiRequest<ApiPort>(`/ports/${portId}/patchbay`, 'PUT', {
-    patchbay_id: patchbayId
-  })
+// API methods
+export const api = {
+  async getState(): Promise<ApiState> {
+    return request<ApiState>('/state')
+  },
 
-export const createDevice = (payload: ApiDeviceCreatePayload) =>
-  apiRequest<ApiDevice>('/devices', 'POST', payload)
+  async createDevice(payload: ApiDeviceCreate): Promise<ApiDevice> {
+    return request<ApiDevice>('/devices', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
 
-export const deleteDevice = (deviceId: number) =>
-  apiRequest<{ id: number; name: string; type: string }>(`/devices/${deviceId}`, 'DELETE')
+  async deleteDevice(deviceId: number): Promise<ApiDevice> {
+    return request<ApiDevice>(`/devices/${deviceId}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async linkPort(portId: string, patchbayId: number): Promise<ApiPortLinkResponse> {
+    return request<ApiPortLinkResponse>(`/ports/${portId}/link`, {
+      method: 'POST',
+      body: JSON.stringify({ patchbay_id: patchbayId }),
+    })
+  },
+
+  async updatePortPatchbay(portId: string, patchbayId: number | null): Promise<ApiPort> {
+    return request<ApiPort>(`/ports/${portId}/patchbay`, {
+      method: 'PUT',
+      body: JSON.stringify({ patchbay_id: patchbayId }),
+    })
+  },
+
+  async unlinkPort(portId: string): Promise<ApiPort> {
+    return request<ApiPort>(`/ports/${portId}/unlink`, {
+      method: 'POST',
+    })
+  },
+}

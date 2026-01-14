@@ -51,8 +51,6 @@ jobs:
           PI_USER: ${{ secrets.PI_USER }}
           PI_SSH_PORT: ${{ secrets.PI_SSH_PORT }}
           REMOTE_PATH: ${{ env.REMOTE_PATH }}
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
 
       - name: Limpiar clave local
         if: always()

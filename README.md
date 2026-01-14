@@ -9,99 +9,119 @@ Sistema web para gestionar y visualizar conexiones de patchbay en estudios de au
 - **Administración de Puertos**: Cada dispositivo puede tener múltiples puertos (Input/Output/Other)
 - **Vinculación Dinámica**: Conecta puertos de dispositivos a puntos del patchbay
 - **Búsqueda y Filtrado**: Encuentra rápidamente dispositivos y conexiones
-- **Persistencia en la Nube**: Datos almacenados en Supabase
+- **Persistencia con API**: Datos guardados en PostgreSQL mediante FastAPI backend
 
 ## 🛠️ Tech Stack
 
+### Frontend
 - **Frontend**: Vue 3 + TypeScript
 - **Build Tool**: Vite
 - **State Management**: Store reactivo con Vue Composition API
-- **Backend/DB**: Supabase (PostgreSQL)
 - **Estilos**: CSS vanilla con diseño oscuro profesional
+
+### Backend
+- **API**: FastAPI
+- **Database**: PostgreSQL 16
+- **ORM**: SQLAlchemy 2.0
+- **Migrations**: Alembic
 
 ## 📋 Requisitos Previos
 
 - Node.js 18+
+- Docker & Docker Compose
 - npm o yarn
-- Cuenta en [Supabase](https://supabase.com)
 
 ## 🚀 Instalación
 
-1. **Clonar el repositorio**
+### Backend (API + Database)
+
+1. **Ir a la carpeta del backend**
    ```bash
-   git clone https://github.com/ianrichard3/audio-tech-web.git
-   cd audio-tech-web
+   cd api-backend
    ```
 
-2. **Instalar dependencias**
+2. **Copiar variables de entorno**
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Levantar servicios con Docker**
+   ```bash
+   docker compose up --build
+   ```
+
+   Esto levanta:
+   - PostgreSQL en puerto `5435`
+   - API FastAPI en puerto `8088`
+   - pgAdmin en puerto `8090`
+
+4. **Verificar API**
+   - Swagger: http://localhost:8088/docs
+   - Health: http://localhost:8088/health
+
+### Frontend (Vue App)
+
+1. **Instalar dependencias**
    ```bash
    npm install
    ```
 
-3. **Configurar Supabase**
+2. **Configurar variables de entorno**
    
-   Crear un archivo `.env` en la raíz:
+   El archivo `.env` ya debe tener:
    ```env
-   VITE_SUPABASE_URL=tu_supabase_url
-   VITE_SUPABASE_ANON_KEY=tu_anon_key
+   VITE_API_URL=http://localhost:8088
    ```
 
-4. **Crear las tablas en Supabase**
-   
-   Ejecutar el contenido de `supabase/schema.sql` en el SQL Editor de Supabase.
-
-5. **Iniciar el servidor de desarrollo**
+3. **Iniciar servidor de desarrollo**
    ```bash
    npm run dev
    ```
 
+   La app estará disponible en http://localhost:5173
+
 ## 📁 Estructura del Proyecto
 
 ```
-audio-tech-web/
-├── src/
+pepper/
+├── src/                        # Frontend Vue
 │   ├── components/
 │   │   ├── PatchBayGrid.vue    # Grilla visual del patchbay
-│   │   └── DevicesManager.vue  # Gestión de dispositivos
+│   │   ├── DevicesManager.vue  # Gestión de dispositivos
+│   │   └── ConnectionFinder.vue
 │   ├── store/
-│   │   └── index.ts            # Estado global reactivo
+│   │   └── index.ts            # Estado global + API calls
 │   ├── lib/
-│   │   └── supabase.ts         # Cliente de Supabase
-│   ├── types/
-│   │   └── database.types.ts   # Tipos de TypeScript
+│   │   └── api.ts              # Cliente HTTP para backend
+│   ├── data/
+│   │   └── patchbayData.json   # Datos estáticos del patchbay
 │   ├── App.vue
 │   └── main.ts
-├── supabase/
-│   ├── schema.sql              # Esquema de la base de datos
-│   └── seed_patchbay.sql       # Datos iniciales del patchbay
-└── package.json
+└── api-backend/                # Backend FastAPI
+    ├── app/
+    │   ├── api/routes/         # Endpoints HTTP
+    │   ├── models/             # Modelos SQLAlchemy
+    │   ├── schemas/            # Schemas Pydantic
+    │   └── services/           # Lógica de negocio
+    ├── alembic/                # Migraciones DB
+    └── docker-compose.yml
 ```
 
 ## 🗄️ Modelo de Datos
 
+La API maneja tres entidades principales:
+
 ### Devices
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | SERIAL | Identificador único |
-| name | VARCHAR | Nombre del dispositivo |
-| type | VARCHAR | Tipo (Preamp, Compressor, EQ, etc.) |
+Equipos de audio (preamps, synths, etc.)
+- `id`, `name`, `type`
 
 ### Ports
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | VARCHAR | Identificador único |
-| device_id | INTEGER | FK a devices |
-| label | VARCHAR | Nombre del puerto |
-| type | ENUM | Input, Output, Other |
-| patchbay_id | INTEGER | FK a patchbay_points (nullable) |
+Puertos de entrada/salida de cada device
+- `id`, `device_id`, `label`, `type` (Input/Output/Other), `patchbay_id`
 
 ### Patchbay Points
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | SERIAL | Número del punto (1-96) |
-| name | VARCHAR | Etiqueta del punto |
-| description | TEXT | Descripción adicional |
-| type | VARCHAR | Tipo de punto |
+Puntos físicos del patchbay
+- `id`, `name`, `description`, `type`
 
 ## 🎮 Uso
 
@@ -123,21 +143,49 @@ audio-tech-web/
 
 ## 📜 Scripts Disponibles
 
+### Frontend
 ```bash
 npm run dev      # Servidor de desarrollo
 npm run build    # Build de producción
 npm run preview  # Preview del build
 ```
 
+### Backend
+```bash
+docker compose up         # Levantar servicios
+docker compose down       # Detener servicios
+docker compose logs api   # Ver logs de la API
+```
+
 ## 🐳 Docker
 
+Para correr todo el stack completo:
+
 ```bash
-docker-compose up --build
+# Backend
+cd api-backend && docker compose up -d
+
+# Frontend (en otra terminal)
+npm run dev
 ```
+
+O para deployar el frontend también con Docker, usar el `docker-compose.yml` en la raíz.
+
+## 🔧 API Endpoints
+
+- `GET /state` - Estado completo (patchbay + devices)
+- `POST /devices` - Crear dispositivo con puertos
+- `DELETE /devices/{id}` - Borrar dispositivo
+- `POST /ports/{id}/link` - Vincular puerto a patchbay
+- `POST /ports/{id}/unlink` - Desvincular puerto
+- `PUT /ports/{id}/patchbay` - Actualizar patchbay de un puerto
+
+Ver documentación completa en http://localhost:8088/docs
 
 ## 📄 Licencia
 
 MIT
+
 
 ---
 

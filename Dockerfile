@@ -2,12 +2,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# Build args para Vite (se inyectan en build time)
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_KEY
-ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL
-ENV VITE_SUPABASE_KEY=$VITE_SUPABASE_KEY
-
 COPY package*.json ./
 RUN npm ci
 COPY . .
