@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { createDevice as createDeviceApi, deleteDevice as deleteDeviceApi, getState, linkPort, unlinkPort } from '@/lib/api'
+import { api, type ApiPort, type ApiDevice, type ApiPatchbayPoint } from '@/lib/api'
 
 // Types
 export interface PatchBayNode {
@@ -23,6 +23,34 @@ export interface Device {
   ports: DevicePort[];
 }
 
+// Convert API types (snake_case) to frontend types (camelCase)
+function apiPortToDevicePort(apiPort: ApiPort): DevicePort {
+  return {
+    id: apiPort.id,
+    label: apiPort.label,
+    type: apiPort.type,
+    patchbayId: apiPort.patchbay_id,
+  }
+}
+
+function apiDeviceToDevice(apiDevice: ApiDevice): Device {
+  return {
+    id: apiDevice.id,
+    name: apiDevice.name,
+    type: apiDevice.type,
+    ports: apiDevice.ports.map(apiPortToDevicePort),
+  }
+}
+
+function apiPatchbayToNode(apiPoint: ApiPatchbayPoint): PatchBayNode {
+  return {
+    id: apiPoint.id,
+    name: apiPoint.name,
+    description: apiPoint.description,
+    type: apiPoint.type,
+  }
+}
+
 export const store = reactive({
   patchbayNodes: [] as PatchBayNode[],
   devices: [] as Device[],
@@ -39,21 +67,9 @@ export const store = reactive({
     this.error = null
     
     try {
-      const data = await getState()
-
-      this.patchbayNodes = data.patchbay_points
-      this.devices = data.devices.map((device) => ({
-        id: device.id,
-        name: device.name,
-        type: device.type,
-        ports: device.ports.map((port) => ({
-          id: port.id,
-          label: port.label,
-          type: port.type,
-          patchbayId: port.patchbay_id
-        }))
-      }))
-      
+      const state = await api.getState()
+      this.patchbayNodes = state.patchbay_points.map(apiPatchbayToNode)
+      this.devices = state.devices.map(apiDeviceToDevice)
     } catch (err: any) {
       this.error = err.message
       console.error('Error loading data:', err)
@@ -76,13 +92,14 @@ export const store = reactive({
   
   async completeLink(patchbayId: number) {
     if (!this.pendingLinkPortId) return
-    
+
     try {
-      const data = await linkPort(this.pendingLinkPortId, patchbayId)
+      const response = await api.linkPort(this.pendingLinkPortId, patchbayId)
       
-      if (data.unlinked_port_id) {
+      // Update local state: unlink old port if any
+      if (response.unlinked_port_id) {
         for (const device of this.devices) {
-          const oldPort = device.ports.find(p => p.id === data.unlinked_port_id)
+          const oldPort = device.ports.find(p => p.id === response.unlinked_port_id)
           if (oldPort) {
             oldPort.patchbayId = null
             break
@@ -90,16 +107,17 @@ export const store = reactive({
         }
       }
 
-      // Update local state
+      // Update linked port
       for (const device of this.devices) {
         const port = device.ports.find(p => p.id === this.pendingLinkPortId)
         if (port) {
-          port.patchbayId = data.patchbay_id
+          port.patchbayId = response.patchbay_id
           break
         }
       }
     } catch (err: any) {
       console.error('Error linking port:', err)
+      this.error = err.message
       return
     }
     
@@ -115,89 +133,78 @@ export const store = reactive({
   // Flow: Patchbay -> Device (Unlink or Link via Search)
   async unlinkPort(deviceId: number, portId: string) {
     try {
-      await unlinkPort(portId)
+      await api.unlinkPort(portId)
       
-      // Update local state
       const device = this.devices.find(d => d.id === deviceId)
       if (device) {
         const port = device.ports.find(p => p.id === portId)
-        if (port) {
-          port.patchbayId = null
-        }
+        if (port) port.patchbayId = null
       }
     } catch (err: any) {
       console.error('Error unlinking port:', err)
+      this.error = err.message
     }
   },
 
   // Link a specific port to a patchbay ID (used from the Patchbay search modal)
   async linkPatchbayToDevice(patchbayId: number, deviceId: number, portId: string) {
     try {
-      const data = await linkPort(portId, patchbayId)
+      const response = await api.linkPort(portId, patchbayId)
       
-      // Update local state - unlink old port if there was one
-      if (data.unlinked_port_id) {
+      // Update local state: unlink old port if any
+      if (response.unlinked_port_id) {
         for (const device of this.devices) {
-          const oldPort = device.ports.find(p => p.id === data.unlinked_port_id)
+          const oldPort = device.ports.find(p => p.id === response.unlinked_port_id)
           if (oldPort) {
             oldPort.patchbayId = null
             break
           }
         }
       }
-      
-      // Link new port
+
+      // Update linked port
       const device = this.devices.find(d => d.id === deviceId)
       if (device) {
         const port = device.ports.find(p => p.id === portId)
         if (port) {
-          port.patchbayId = data.patchbay_id
+          port.patchbayId = response.patchbay_id
         }
       }
     } catch (err: any) {
       console.error('Error linking patchbay to device:', err)
+      this.error = err.message
     }
   },
   
   async addDevice(device: Omit<Device, 'id'>) {
     try {
-      const data = await createDeviceApi({
+      const apiDevice = await api.createDevice({
         name: device.name,
         type: device.type,
         ports: device.ports.map(p => ({
           label: p.label,
           type: p.type,
-          patchbay_id: p.patchbayId
-        }))
+          patchbay_id: p.patchbayId,
+        })),
       })
       
-      // Add to local state
-      this.devices.push({
-        id: data.id,
-        name: data.name,
-        type: data.type,
-        ports: data.ports.map(p => ({
-          id: p.id,
-          label: p.label,
-          type: p.type as 'Input' | 'Output' | 'Other',
-          patchbayId: p.patchbay_id
-        }))
-      })
+      this.devices.push(apiDeviceToDevice(apiDevice))
     } catch (err: any) {
       console.error('Error adding device:', err)
+      this.error = err.message
       throw err
     }
   },
   
   async deleteDevice(id: number) {
     try {
-      await deleteDeviceApi(id)
+      await api.deleteDevice(id)
       
-      // Remove from local state
       const index = this.devices.findIndex(d => d.id === id)
       if (index !== -1) this.devices.splice(index, 1)
     } catch (err: any) {
       console.error('Error deleting device:', err)
+      this.error = err.message
       throw err
     }
   },
