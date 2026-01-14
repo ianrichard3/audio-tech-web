@@ -7,3 +7,9 @@ services:
     ports:
       - "8080:3000"
     restart: unless-stopped
+    networks:
+      - pepper-network
+
+networks:
+  pepper-network:
+    external: true
