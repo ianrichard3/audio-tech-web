@@ -195,6 +195,30 @@ export const store = reactive({
       throw err
     }
   },
+
+  async updateDevice(id: number, payload: { name: string; type: string; ports: DevicePort[] }) {
+    try {
+      const apiDevice = await api.updateDevice(id, {
+        name: payload.name,
+        type: payload.type,
+        ports: payload.ports.map(p => ({
+          id: p.id || undefined,
+          label: p.label,
+          type: p.type,
+          patchbay_id: p.patchbayId ?? null,
+        })),
+      })
+
+      const index = this.devices.findIndex(d => d.id === id)
+      if (index !== -1) {
+        this.devices[index] = apiDeviceToDevice(apiDevice)
+      }
+    } catch (err: any) {
+      console.error('Error updating device:', err)
+      this.error = err.message
+      throw err
+    }
+  },
   
   async deleteDevice(id: number) {
     try {
