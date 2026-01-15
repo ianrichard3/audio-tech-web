@@ -46,16 +46,31 @@ export interface ApiDeviceCreate {
   }>
 }
 
+export interface ApiDeviceUpdate {
+  name: string
+  type: string
+  ports: Array<{
+    id?: string
+    label: string
+    type: 'Input' | 'Output' | 'Other'
+    patchbay_id?: number | null
+  }>
+}
+
 // HTTP client
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_URL}${path}`
+  const body = options?.body
+  const headers: HeadersInit = {
+    ...options?.headers,
+  }
   
   try {
     const response = await fetch(url, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
+        ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...headers,
       },
     })
 
@@ -90,6 +105,13 @@ export const api = {
     })
   },
 
+  async updateDevice(deviceId: number, payload: ApiDeviceUpdate): Promise<ApiDevice> {
+    return request<ApiDevice>(`/devices/${deviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+
   async linkPort(portId: string, patchbayId: number): Promise<ApiPortLinkResponse> {
     return request<ApiPortLinkResponse>(`/ports/${portId}/link`, {
       method: 'POST',
@@ -107,6 +129,16 @@ export const api = {
   async unlinkPort(portId: string): Promise<ApiPort> {
     return request<ApiPort>(`/ports/${portId}/unlink`, {
       method: 'POST',
+    })
+  },
+
+  async parseDeviceFromImage(image: File): Promise<ApiDevice> {
+    const formData = new FormData()
+    formData.append('image', image)
+
+    return request<ApiDevice>('/devices/parse-image', {
+      method: 'POST',
+      body: formData,
     })
   },
 }

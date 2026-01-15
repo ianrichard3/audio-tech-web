@@ -55,6 +55,7 @@ app/__init__.py
 app/api/__init__.py
 app/api/deps.py
 app/api/routes/__init__.py
+app/api/routes/ai.py
 app/api/routes/devices.py
 app/api/routes/ports.py
 app/api/routes/state.py
@@ -69,12 +70,14 @@ app/models/device.py
 app/models/patchbay_point.py
 app/models/port.py
 app/schemas/__init__.py
+app/schemas/ai_device.py
 app/schemas/device.py
 app/schemas/health.py
 app/schemas/patchbay.py
 app/schemas/port.py
 app/schemas/state.py
 app/services/__init__.py
+app/services/ai_extract.py
 app/services/devices.py
 app/services/ports.py
 app/services/state.py
@@ -449,36 +452,92 @@ def get_db() -> Generator:
         db.close()
 
 ================
-File: app/api/routes/__init__.py
+File: app/api/routes/ai.py
 ================
-from app.api.routes.state import router as state
-from app.api.routes.devices import router as devices
-from app.api.routes.ports import router as ports
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-__all__ = ["state", "devices", "ports"]
+from app.schemas.ai_device import AIDeviceExtraction
+from app.services.ai_extract import AIExtractionError, AIInvalidImageError, extract_device_from_image
+
+
+router = APIRouter(tags=["AI"])
+
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+@router.post(
+    "/ai/parse-image",
+    response_model=AIDeviceExtraction,
+    status_code=status.HTTP_200_OK,
+    summary="Extract device info from an image",
+    description="Parses a device photo into a structured JSON payload.",
+    responses={
+        400: {
+            "description": "Invalid image payload",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_content_type": {
+                            "summary": "Invalid content type",
+                            "value": {"detail": "Invalid content type"},
+                        },
+                        "invalid_image": {
+                            "summary": "Unreadable image",
+                            "value": {"detail": "Invalid image"},
+                        },
+                    }
+                }
+            },
+        },
+        413: {
+            "description": "Image too large",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "too_large": {
+                            "summary": "Payload too large",
+                            "value": {"detail": "Image too large"},
+                        }
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Model output invalid",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_schema": {
+                            "summary": "Model output did not match schema",
+                            "value": {"detail": "Model output did not match schema"},
+                        }
+                    }
+                }
+            },
+        },
+    },
+)
+async def parse_image_endpoint(
+    image: UploadFile = File(..., description="Device photo (jpg/png). Max 12MB."),
+):
+    if image.content_type and not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type")
+
+    image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image too large")
+
+    try:
+        return extract_device_from_image(image_bytes, content_type=image.content_type)
+    except AIInvalidImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except AIExtractionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 ================
 File: app/core/__init__.py
 ================
 
-
-================
-File: app/core/config.py
-================
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
-from typing import List
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
-
-    database_url: str = Field(..., alias="DATABASE_URL")
-    cors_origins: List[str] = Field(default_factory=list, alias="CORS_ORIGINS")
-    app_name: str = "Pepper API"
-
-
-settings = Settings()
 
 ================
 File: app/db/__init__.py
@@ -564,6 +623,141 @@ File: app/schemas/__init__.py
 
 
 ================
+File: app/schemas/ai_device.py
+================
+from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class AIDeviceCategory(str, Enum):
+    SYNTH = "synth"
+    DRUM_MACHINE = "drum_machine"
+    MIXER = "mixer"
+    INTERFACE = "interface"
+    EFFECTS = "effects"
+    CONTROLLER = "controller"
+    PATCHBAY = "patchbay"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class AIPortPanel(str, Enum):
+    FRONT = "front"
+    REAR = "rear"
+    TOP = "top"
+    LEFT = "left"
+    RIGHT = "right"
+    BOTTOM = "bottom"
+    UNKNOWN = "unknown"
+
+
+class AIPortConnector(str, Enum):
+    MIDI = "midi"
+    USB = "usb"
+    TRS = "trs"
+    TS = "ts"
+    XLR = "xlr"
+    RCA = "rca"
+    BANTAM = "bantam"
+    ETHERNET = "ethernet"
+    OPTICAL = "optical"
+    COAX = "coax"
+    POWER = "power"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class AIPortDirection(str, Enum):
+    INPUT = "input"
+    OUTPUT = "output"
+    BIDIRECTIONAL = "bidirectional"
+    UNKNOWN = "unknown"
+
+
+class AIPortSignal(str, Enum):
+    AUDIO = "audio"
+    MIDI = "midi"
+    CV = "cv"
+    GATE = "gate"
+    SYNC = "sync"
+    DATA = "data"
+    POWER = "power"
+    OTHER = "other"
+    UNKNOWN = "unknown"
+
+
+class AIDeviceInfo(BaseModel):
+    brand: str = Field(..., description="Device brand or manufacturer.")
+    model: str = Field(..., description="Device model name/number.")
+    category: AIDeviceCategory = Field(..., description="Device category.")
+    confidence: float = Field(..., ge=0, le=1, description="Confidence score from 0 to 1.")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value):
+        if isinstance(value, (int, float)) and 1 < value <= 100:
+            return float(value) / 100
+        return value
+
+
+class AIPort(BaseModel):
+    id: str = Field(..., description="Stable port identifier.")
+    label: str = Field(..., description="Port label or marking.")
+    panel: AIPortPanel = Field(..., description="Panel location of the port.")
+    connector: AIPortConnector = Field(..., description="Connector type.")
+    direction: AIPortDirection = Field(..., description="Signal direction.")
+    signal: AIPortSignal = Field(..., description="Signal type.")
+    channels: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Channel count if known.",
+    )
+    confidence: float = Field(..., ge=0, le=1, description="Confidence score from 0 to 1.")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def normalize_confidence(cls, value):
+        if isinstance(value, (int, float)) and 1 < value <= 100:
+            return float(value) / 100
+        return value
+
+
+class AIDeviceExtraction(BaseModel):
+    device: AIDeviceInfo
+    ports: List[AIPort]
+    warnings: List[str] = Field(default_factory=list, description="Normalization warnings or uncertainty notes.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "device": {
+                        "brand": "Roland",
+                        "model": "Juno-106",
+                        "category": "synth",
+                        "confidence": 0.86,
+                    },
+                    "ports": [
+                        {
+                            "id": "port-1",
+                            "label": "MIDI IN",
+                            "panel": "rear",
+                            "connector": "midi",
+                            "direction": "input",
+                            "signal": "midi",
+                            "channels": 1,
+                            "confidence": 0.83,
+                        }
+                    ],
+                    "warnings": ["rear panel partially visible"],
+                }
+            ]
+        }
+    )
+
+================
 File: app/schemas/health.py
 ================
 from pydantic import BaseModel, ConfigDict, Field
@@ -588,6 +782,220 @@ class HealthResponse(BaseModel):
 File: app/services/__init__.py
 ================
 
+
+================
+File: app/services/ai_extract.py
+================
+import io
+import json
+import re
+from typing import List, Optional
+
+from google import genai
+from google.genai import types
+from PIL import Image, UnidentifiedImageError
+from pydantic import ValidationError
+
+from app.core.config import settings
+from app.schemas.ai_device import (
+    AIDeviceCategory,
+    AIDeviceExtraction,
+    AIPortConnector,
+    AIPortDirection,
+    AIPortPanel,
+    AIPortSignal,
+)
+from app.schemas.device import DeviceResponse
+from app.schemas.port import PortResponse
+from app.models.port import PortType
+
+
+class AIExtractionError(RuntimeError):
+    pass
+
+
+class AIInvalidImageError(AIExtractionError):
+    pass
+
+
+_OBSERVATION_PROMPT = """Analyze the device in the image and return OBSERVATIONS as plain text.
+
+Rules:
+- Focus on brand, model, device category, and each visible port.
+- For each port, mention label, panel location, connector, direction, signal type, and channel count.
+- If something is unclear, say "unknown".
+- Add warnings for occlusions, blur, glare, or partial views. Prefix warning lines with "WARNING:".
+Return only text lines without Markdown.
+"""
+
+
+def _enum_values(enum_cls) -> str:
+    return ", ".join(member.value for member in enum_cls)
+
+
+_NORMALIZATION_PROMPT_TEMPLATE = """You are given OBSERVATIONS from an image.
+Convert them into a JSON object with the following shape:
+{{
+  "device": {{"brand": "", "model": "", "category": "", "confidence": 0.0}},
+  "ports": [
+    {{"id": "", "label": "", "panel": "", "connector": "", "direction": "", "signal": "", "channels": null, "confidence": 0.0}}
+  ],
+  "warnings": []
+}}
+
+Valid enum values:
+- category: {categories}
+- panel: {panels}
+- connector: {connectors}
+- direction: {directions}
+- signal: {signals}
+
+Rules:
+- Use "unknown" when not sure.
+- confidence is a float from 0 to 1.
+- channels is an integer or null when unknown.
+- id should be a stable string like "port-1", "port-2".
+- Output ONLY valid JSON. No code fences or extra text.
+
+OBSERVATIONS:
+{observations}
+"""
+
+
+_NORMALIZATION_RETRY_SUFFIX = """
+IMPORTANT: Output only valid JSON. Do not include any extra text or Markdown.
+"""
+
+
+def _strip_code_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+def _parse_json(text: str) -> dict:
+    return json.loads(_strip_code_fences(text))
+
+
+def _extract_warnings(observations: str) -> List[str]:
+    warnings: List[str] = []
+    for line in observations.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        upper = stripped.upper()
+        if upper.startswith("WARNING:"):
+            warning = stripped.split(":", 1)[1].strip()
+            if warning:
+                warnings.append(warning)
+    return warnings
+
+
+def _build_normalization_prompt(observations: str, warnings: List[str], retry: bool) -> str:
+    prompt = _NORMALIZATION_PROMPT_TEMPLATE.format(
+        categories=_enum_values(AIDeviceCategory),
+        panels=_enum_values(AIPortPanel),
+        connectors=_enum_values(AIPortConnector),
+        directions=_enum_values(AIPortDirection),
+        signals=_enum_values(AIPortSignal),
+        observations=observations.strip(),
+    )
+    if warnings:
+        prompt += "\nKnown warnings to include:\n"
+        for warning in warnings:
+            prompt += f"- {warning}\n"
+    if retry:
+        prompt += _NORMALIZATION_RETRY_SUFFIX
+    return prompt
+
+
+def _generate_text(prompt: str, image_bytes: bytes, content_type: Optional[str]) -> str:
+    mime_type = content_type or "image/jpeg"
+    client = genai.Client(api_key=settings.gemini_api_key)
+    image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=[image_part, prompt],
+    )
+    return (response.text or "").strip()
+
+
+def extract_device_from_image(image_bytes: bytes, content_type: Optional[str] = None) -> AIDeviceExtraction:
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image.verify()
+    except UnidentifiedImageError as exc:
+        raise AIInvalidImageError("Invalid image") from exc
+    except Exception as exc:
+        raise AIInvalidImageError("Unable to read image") from exc
+
+    observations = _generate_text(_OBSERVATION_PROMPT, image_bytes, content_type)
+    warnings = _extract_warnings(observations)
+
+    last_error: Optional[Exception] = None
+    for attempt in range(2):
+        prompt = _build_normalization_prompt(observations, warnings, retry=attempt > 0)
+        normalized_text = _generate_text(prompt, image_bytes, content_type)
+        try:
+            payload = _parse_json(normalized_text)
+            extraction = AIDeviceExtraction.model_validate(payload)
+            if warnings and not extraction.warnings:
+                extraction = extraction.model_copy(update={"warnings": warnings})
+            elif warnings:
+                merged = list(dict.fromkeys(extraction.warnings + warnings))
+                extraction = extraction.model_copy(update={"warnings": merged})
+            return extraction
+        except (json.JSONDecodeError, ValidationError) as exc:
+            last_error = exc
+
+    raise AIExtractionError("Model output did not match schema") from last_error
+
+
+def _map_port_type(direction: AIPortDirection) -> PortType:
+    if direction == AIPortDirection.INPUT:
+        return PortType.INPUT
+    if direction == AIPortDirection.OUTPUT:
+        return PortType.OUTPUT
+    return PortType.OTHER
+
+
+def _device_name_from_extraction(extraction: AIDeviceExtraction) -> str:
+    brand = extraction.device.brand.strip()
+    model = extraction.device.model.strip()
+    if brand and model:
+        return f"{brand} {model}"
+    if brand:
+        return brand
+    if model:
+        return model
+    return "Unknown device"
+
+
+def build_device_response_from_extraction(extraction: AIDeviceExtraction) -> DeviceResponse:
+    ports: List[PortResponse] = []
+    for index, port in enumerate(extraction.ports, start=1):
+        ports.append(
+            PortResponse(
+                id=f"ai-dev-0-port-{index}",
+                label=port.label,
+                type=_map_port_type(port.direction),
+                patchbay_id=None,
+            )
+        )
+
+    return DeviceResponse(
+        id=0,
+        name=_device_name_from_extraction(extraction),
+        type=extraction.device.category.value,
+        ports=ports,
+    )
+
+
+def propose_device_from_image(image_bytes: bytes, content_type: Optional[str] = None) -> DeviceResponse:
+    extraction = extract_device_from_image(image_bytes, content_type=content_type)
+    return build_device_response_from_extraction(extraction)
 
 ================
 File: app/services/ports.py
@@ -803,36 +1211,6 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ================
-File: entrypoint.sh
-================
-#!/usr/bin/env sh
-set -e
-
-alembic upgrade head
-exec "$@"
-
-================
-File: requirements.txt
-================
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-SQLAlchemy==2.0.31
-psycopg[binary]==3.1.19
-alembic==1.13.2
-pydantic-settings==2.3.4
-
-================
-File: .env.example
-================
-POSTGRES_USER=pepper
-POSTGRES_PASSWORD=pepper
-POSTGRES_DB=pepper
-DATABASE_URL=postgresql+psycopg://pepper:pepper@db:5432/pepper
-CORS_ORIGINS=["http://localhost:5173","http://localhost:8000"]
-PGADMIN_DEFAULT_EMAIL=admin@pepper.com
-PGADMIN_DEFAULT_PASSWORD=admin
-
-================
 File: alembic.ini
 ================
 [alembic]
@@ -939,56 +1317,14 @@ def downgrade() -> None:
     port_type.drop(op.get_bind(), checkfirst=True)
 
 ================
-File: app/api/routes/devices.py
+File: app/api/routes/__init__.py
 ================
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from app.api.routes.state import router as state
+from app.api.routes.devices import router as devices
+from app.api.routes.ports import router as ports
+from app.api.routes.ai import router as ai
 
-from app.api.deps import get_db
-from app.schemas.device import DeviceCreate, DeviceResponse, DeviceDeleteResponse
-from app.services.devices import create_device, delete_device
-
-
-router = APIRouter(tags=["Devices"])
-
-
-@router.post(
-    "/devices",
-    response_model=DeviceResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a device",
-    description="Creates a device and its ports in a single request.",
-)
-def create_device_endpoint(payload: DeviceCreate, db: Session = Depends(get_db)):
-    return create_device(db, payload)
-
-
-@router.delete(
-    "/devices/{device_id}",
-    response_model=DeviceDeleteResponse,
-    summary="Delete a device",
-    description="Deletes a device by id. Ports are removed as well.",
-    responses={
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "not_found": {
-                            "summary": "Device not found",
-                            "value": {"detail": "Device not found"},
-                        }
-                    }
-                }
-            },
-        }
-    },
-)
-def delete_device_endpoint(device_id: int, db: Session = Depends(get_db)):
-    try:
-        return delete_device(db, device_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+__all__ = ["state", "devices", "ports", "ai"]
 
 ================
 File: app/api/routes/ports.py
@@ -1144,51 +1480,24 @@ def read_state(db: Session = Depends(get_db)):
     return get_state(db)
 
 ================
-File: app/main.py
+File: app/core/config.py
 ================
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.core.config import settings
-from app.api.routes.state import router as state_router
-from app.api.routes.devices import router as devices_router
-from app.api.routes.ports import router as ports_router
-from app.schemas.health import HealthResponse
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+from typing import List
 
 
-openapi_tags = [
-    {"name": "Health", "description": "Service status checks."},
-    {"name": "State", "description": "Read the current system state."},
-    {"name": "Devices", "description": "Create and delete devices (and their ports)."},
-    {"name": "Ports", "description": "Link/unlink ports to patchbay points."},
-]
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-app = FastAPI(title=settings.app_name, openapi_tags=openapi_tags)
-
-if settings.cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"] ,
-        allow_headers=["*"],
-    )
+    database_url: str = Field(..., alias="DATABASE_URL")
+    cors_origins: List[str] = Field(default_factory=list, alias="CORS_ORIGINS")
+    app_name: str = "Pepper API"
+    gemini_api_key: str = Field(..., alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-3-flash-preview", alias="GEMINI_MODEL")
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    tags=["Health"],
-    summary="Health check",
-    description="Returns a simple health status payload.",
-)
-def health_check():
-    return {"status": "ok"}
-
-
-app.include_router(state_router)
-app.include_router(devices_router)
-app.include_router(ports_router)
+settings = Settings()
 
 ================
 File: app/models/port.py
@@ -1541,6 +1850,18 @@ def delete_device(db: Session, device_id: int) -> Device:
     return device
 
 ================
+File: entrypoint.sh
+================
+#!/usr/bin/env sh
+set -e
+
+alembic upgrade head
+if [ "${UVICORN_RELOAD:-0}" = "1" ]; then
+  exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app
+fi
+exec "$@"
+
+================
 File: README.md
 ================
 # pepper-backend
@@ -1566,6 +1887,205 @@ docker compose up --build
 - Health: `http://localhost:8000/health`
 
 ================
+File: requirements.txt
+================
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+SQLAlchemy==2.0.31
+psycopg[binary]==3.1.19
+alembic==1.13.2
+pydantic-settings==2.3.4
+pillow==10.4.0
+google-genai==0.6.0
+
+================
+File: .env.example
+================
+POSTGRES_USER=pepper
+POSTGRES_PASSWORD=pepper
+POSTGRES_DB=pepper
+DATABASE_URL=postgresql+psycopg://pepper:pepper@db:5432/pepper
+CORS_ORIGINS=["http://localhost:5173","http://localhost:8000"]
+PGADMIN_DEFAULT_EMAIL=admin@pepper.com
+PGADMIN_DEFAULT_PASSWORD=admin
+GEMINI_API_KEY=your-key-here
+GEMINI_MODEL=gemini-3-flash-preview
+
+================
+File: app/api/routes/devices.py
+================
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_db
+from app.schemas.device import DeviceCreate, DeviceResponse, DeviceDeleteResponse
+from app.services.devices import create_device, delete_device
+from app.services.ai_extract import AIExtractionError, AIInvalidImageError, propose_device_from_image
+
+
+router = APIRouter(tags=["Devices"])
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
+
+
+@router.post(
+    "/devices",
+    response_model=DeviceResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a device",
+    description="Creates a device and its ports in a single request.",
+)
+def create_device_endpoint(payload: DeviceCreate, db: Session = Depends(get_db)):
+    return create_device(db, payload)
+
+
+@router.delete(
+    "/devices/{device_id}",
+    response_model=DeviceDeleteResponse,
+    summary="Delete a device",
+    description="Deletes a device by id. Ports are removed as well.",
+    responses={
+        404: {
+            "description": "Not Found",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "not_found": {
+                            "summary": "Device not found",
+                            "value": {"detail": "Device not found"},
+                        }
+                    }
+                }
+            },
+        }
+    },
+)
+def delete_device_endpoint(device_id: int, db: Session = Depends(get_db)):
+    try:
+        return delete_device(db, device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post(
+    "/devices/parse-image",
+    response_model=DeviceResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Extract device info from an image",
+    description="Parses a device photo and returns a Device-style response for UI autofill.",
+    responses={
+        400: {
+            "description": "Invalid image payload",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_content_type": {
+                            "summary": "Invalid content type",
+                            "value": {"detail": "Invalid content type"},
+                        },
+                        "invalid_image": {
+                            "summary": "Unreadable image",
+                            "value": {"detail": "Invalid image"},
+                        },
+                    }
+                }
+            },
+        },
+        413: {
+            "description": "Image too large",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "too_large": {
+                            "summary": "Payload too large",
+                            "value": {"detail": "Image too large"},
+                        }
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Model output invalid",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "invalid_schema": {
+                            "summary": "Model output did not match schema",
+                            "value": {"detail": "Model output did not match schema"},
+                        }
+                    }
+                }
+            },
+        },
+    },
+)
+async def parse_device_from_image_endpoint(
+    image: UploadFile = File(..., description="Device photo (jpg/png). Max 12MB."),
+):
+    if image.content_type and not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type")
+
+    image_bytes = await image.read(MAX_IMAGE_BYTES + 1)
+    if len(image_bytes) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image too large")
+
+    try:
+        return propose_device_from_image(image_bytes, content_type=image.content_type)
+    except AIInvalidImageError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except AIExtractionError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+================
+File: app/main.py
+================
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import settings
+from app.api.routes.state import router as state_router
+from app.api.routes.devices import router as devices_router
+from app.api.routes.ports import router as ports_router
+from app.api.routes.ai import router as ai_router
+from app.schemas.health import HealthResponse
+
+
+openapi_tags = [
+    {"name": "Health", "description": "Service status checks."},
+    {"name": "State", "description": "Read the current system state."},
+    {"name": "Devices", "description": "Create and delete devices (and their ports)."},
+    {"name": "Ports", "description": "Link/unlink ports to patchbay points."},
+    {"name": "AI", "description": "Extract device information from images."},
+]
+
+app = FastAPI(title=settings.app_name, openapi_tags=openapi_tags)
+
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"] ,
+        allow_headers=["*"],
+    )
+
+
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health check",
+    description="Returns a simple health status payload.",
+)
+def health_check():
+    return {"status": "ok"}
+
+
+app.include_router(state_router)
+app.include_router(devices_router)
+app.include_router(ports_router)
+app.include_router(ai_router)
+
+================
 File: docker-compose.yml
 ================
 services:
@@ -1581,6 +2101,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5435:5432"
+    networks:
+      - pepper-network
 
   api:
     container_name: pepper-api
@@ -1589,10 +2111,17 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL}
+      UVICORN_RELOAD: "1"
     depends_on:
       - db
     ports:
       - "8088:8000"
+    volumes:
+      - .:/app
+    networks:
+      - pepper-network
 
   pgadmin:
     container_name: pepper-pgadmin
@@ -1605,9 +2134,15 @@ services:
       - db
     ports:
       - "8090:80"
+    networks:
+      - pepper-network
 
 volumes:
   postgres_data:
+
+networks:
+  pepper-network:
+    external: true
 
 
 
