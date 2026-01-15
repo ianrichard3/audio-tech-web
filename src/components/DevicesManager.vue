@@ -41,7 +41,7 @@ const newDevice = ref({
   type: 'Preamp'
 })
 
-const newPorts = ref<Array<{ id?: string; label: string; type: 'Input' | 'Output' | 'Other'; patchbayId: number | null }>>([])
+const newPorts = ref<Array<{ id?: string; label: string; type: 'Input' | 'Output' | 'Other'; patchbayId?: number | null }>>([])
 const deviceTypeOptions = [
   'Preamp',
   'Compressor',
@@ -211,7 +211,8 @@ const handleAiFileChange = async (event: Event) => {
     }
     newPorts.value = device.ports.map((port) => ({
       label: port.label,
-      type: port.type
+      type: port.type,
+      patchbayId: null
     }))
     aiStatusMessage.value = 'Formulario completado con AI. Revisalo y guarda.'
     addDeviceMode.value = 'manual'
