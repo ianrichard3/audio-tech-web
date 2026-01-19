@@ -479,7 +479,7 @@ onBeforeUnmount(() => {
           @click="selectDevice(device)"
         >
           <div v-if="device.imageUrl" class="device-thumbnail">
-            <img :src="getDeviceImageSrc(device)" :alt="device.name" />
+            <img :src="getDeviceImageSrc(device) || ''" :alt="device.name" />
           </div>
           <div v-else class="device-thumbnail-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
 
         <div class="device-details">
           <div v-if="selectedDevice.imageUrl" class="device-detail-image">
-            <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+            <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
           </div>
           
           <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
@@ -565,7 +565,7 @@ onBeforeUnmount(() => {
 
         <div class="device-details">
           <div v-if="selectedDevice.imageUrl" class="device-detail-image">
-            <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+            <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
           </div>
           
           <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
@@ -655,7 +655,7 @@ onBeforeUnmount(() => {
                 <img :src="pendingImagePreviewUrl" alt="Preview" />
               </div>
               <div v-else-if="isEditing && selectedDevice?.imageUrl && !pendingImageFile" class="ai-preview">
-                <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+                <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
               </div>
               <button v-if="pendingImagePreviewUrl" class="ghost-btn" @click="clearPendingImage" type="button" style="margin-top: 8px;">Remove Image</button>
             </div>

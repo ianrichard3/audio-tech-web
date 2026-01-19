@@ -104,7 +104,7 @@ export const store = reactive({
       this.devices = state.devices.map(apiDeviceToDevice)
     } catch (err: any) {
       this.error = err.message || strings.toast.loadFailed
-      this.pushToast({ type: 'error', message: this.error })
+      this.pushToast({ type: 'error', message: this.error || strings.toast.loadFailed })
       console.error('Error loading data:', err)
     } finally {
       this.loading = false
@@ -147,7 +147,7 @@ export const store = reactive({
       // Update linked port
       for (const device of this.devices) {
         const port = device.ports.find(p => p.id === this.pendingLink?.portId)
-        if (port) {
+        if (port && response.patchbay_id !== null) {
           port.patchbayId = response.patchbay_id
           break
         }
@@ -157,7 +157,7 @@ export const store = reactive({
         message: strings.toast.linkedSuccess(
           this.pendingLink.deviceName,
           this.pendingLink.portLabel,
-          response.patchbay_id
+          response.patchbay_id ?? 0
         ),
       })
     } catch (err: any) {
@@ -213,7 +213,7 @@ export const store = reactive({
       const device = this.devices.find(d => d.id === deviceId)
       if (device) {
         const port = device.ports.find(p => p.id === portId)
-        if (port) {
+        if (port && response.patchbay_id !== null) {
           port.patchbayId = response.patchbay_id
         }
       }
