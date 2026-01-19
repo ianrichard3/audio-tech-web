@@ -1,28 +1,33 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { api } from '../lib/api'
 import { store, type Device, type DevicePort } from '../store'
+import { strings } from '../ui/strings'
+import ConfirmDialog from '../ui/ConfirmDialog.vue'
+
+const t = strings
 
 const searchQuery = ref('')
-const errorMessage = ref<string | null>(null)
 const isLoading = ref(false)
+const isDesktop = ref(window.innerWidth >= 1024)
 
-const showError = (message: string) => {
-  errorMessage.value = message
-  setTimeout(() => {
-    errorMessage.value = null
-  }, 5000)
+const updateViewport = () => {
+  isDesktop.value = window.innerWidth >= 1024
 }
 
-const clearError = () => {
-  errorMessage.value = null
+onMounted(() => {
+  window.addEventListener('resize', updateViewport)
+})
+
+const showError = (message: string) => {
+  store.pushToast({ type: 'error', message })
 }
 
 const filteredDevices = computed(() => {
   if (!searchQuery.value) return store.devices
   const query = searchQuery.value.toLowerCase()
-  return store.devices.filter(device => 
-    device.name.toLowerCase().includes(query) || 
+  return store.devices.filter(device =>
+    device.name.toLowerCase().includes(query) ||
     device.type.toLowerCase().includes(query) ||
     device.ports.some(p => p.label.toLowerCase().includes(query))
   )
@@ -33,34 +38,44 @@ const showAddModal = ref(false)
 const addDeviceMode = ref<'manual' | 'ai'>('manual')
 const editingDeviceId = ref<number | null>(null)
 const editSnapshot = ref<{ device: { name: string; type: string }; ports: DevicePort[] } | null>(null)
-const DRAFT_STORAGE_KEY = 'pepper.addDeviceDraft'
+const deleteTarget = ref<Device | null>(null)
+const DRAFT_STORAGE_KEY = 'el-riche.addDeviceDraft'
+const LEGACY_DRAFT_STORAGE_KEY = 'pepper.addDeviceDraft'
 
-// New Device Form
+const deviceTypeOptions = t.devices.deviceTypes
+const portTypeOptions = Object.keys(t.devices.portTypes) as Array<keyof typeof t.devices.portTypes>
+const fallbackDeviceType = deviceTypeOptions[deviceTypeOptions.length - 1]
+
 const newDevice = ref({
   name: '',
-  type: 'Preamp'
+  type: deviceTypeOptions[0],
 })
 
 const newPorts = ref<Array<{ id?: string; label: string; type: 'Input' | 'Output' | 'Other'; patchbayId?: number | null }>>([])
-const deviceTypeOptions = [
-  'Preamp',
-  'Compressor',
-  'EQ',
-  'Interface',
-  'Console',
-  'Other'
-]
 
 const aiPreviewUrl = ref<string | null>(null)
 const aiLoading = ref(false)
 const aiStatusMessage = ref<string | null>(null)
 const isEditing = computed(() => editingDeviceId.value !== null)
 
+// Image upload state
+const pendingImageFile = ref<File | null>(null)
+const pendingImagePreviewUrl = ref<string | null>(null)
+const pendingImageError = ref<string | null>(null)
+const isUploadingImage = ref(false)
+
+const aiStep = computed(() => {
+  if (!aiPreviewUrl.value) return 'upload'
+  if (aiLoading.value) return 'processing'
+  if (aiStatusMessage.value) return 'review'
+  return 'upload'
+})
+
 const addPort = () => {
   newPorts.value.push({
-    label: `Port ${newPorts.value.length + 1}`,
-    type: 'Input',
-    patchbayId: null
+    label: t.devices.addPortLabel(newPorts.value.length + 1),
+    type: portTypeOptions[0],
+    patchbayId: null,
   })
 }
 
@@ -78,29 +93,29 @@ const closeDetail = () => {
 
 const normalizeDeviceType = (value: string | null | undefined) => {
   const raw = value?.trim()
-  if (!raw) return 'Other'
+  if (!raw) return fallbackDeviceType
   const match = deviceTypeOptions.find(option => option.toLowerCase() === raw.toLowerCase())
-  return match || 'Other'
+  return match || fallbackDeviceType
 }
 
 const saveDraft = () => {
   if (isEditing.value) return
   const draft = {
     device: newDevice.value,
-    ports: newPorts.value
+    ports: newPorts.value,
   }
   localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
 }
 
 const loadDraft = () => {
-  const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+  const raw = localStorage.getItem(DRAFT_STORAGE_KEY) || localStorage.getItem(LEGACY_DRAFT_STORAGE_KEY)
   if (!raw) return
   try {
     const draft = JSON.parse(raw)
     if (draft?.device?.name !== undefined && draft?.device?.type !== undefined) {
       newDevice.value = {
         name: String(draft.device.name ?? ''),
-        type: normalizeDeviceType(String(draft.device.type ?? 'Other'))
+        type: normalizeDeviceType(String(draft.device.type ?? fallbackDeviceType)),
       }
     }
     if (Array.isArray(draft?.ports)) {
@@ -110,7 +125,7 @@ const loadDraft = () => {
           label: String(port.label),
           type: port.type as 'Input' | 'Output' | 'Other',
           patchbayId: port.patchbayId ?? null,
-          id: port.id || undefined
+          id: port.id || undefined,
         }))
     }
   } catch (err) {
@@ -120,10 +135,11 @@ const loadDraft = () => {
 
 const clearDraft = () => {
   localStorage.removeItem(DRAFT_STORAGE_KEY)
+  localStorage.removeItem(LEGACY_DRAFT_STORAGE_KEY)
 }
 
 const resetAddForm = (clear = false) => {
-  newDevice.value = { name: '', type: 'Preamp' }
+  newDevice.value = { name: '', type: deviceTypeOptions[0] }
   newPorts.value = []
   addDeviceMode.value = 'manual'
   aiStatusMessage.value = null
@@ -131,6 +147,7 @@ const resetAddForm = (clear = false) => {
     URL.revokeObjectURL(aiPreviewUrl.value)
   }
   aiPreviewUrl.value = null
+  clearPendingImage()
   if (clear) {
     clearDraft()
   }
@@ -163,7 +180,7 @@ const openEditModal = (device: Device) => {
     id: port.id,
     label: port.label,
     type: port.type,
-    patchbayId: port.patchbayId
+    patchbayId: port.patchbayId,
   }))
   addDeviceMode.value = 'manual'
   aiStatusMessage.value = null
@@ -177,6 +194,43 @@ const setAiImageFile = (file: File | null) => {
   aiPreviewUrl.value = file ? URL.createObjectURL(file) : null
 }
 
+const setPendingImageFile = (file: File | null) => {
+  // Revoke old preview URL to prevent memory leaks
+  if (pendingImagePreviewUrl.value) {
+    URL.revokeObjectURL(pendingImagePreviewUrl.value)
+  }
+  
+  pendingImageFile.value = file
+  pendingImagePreviewUrl.value = file ? URL.createObjectURL(file) : null
+  pendingImageError.value = null
+  
+  // Validate file
+  if (file) {
+    if (!file.type.startsWith('image/')) {
+      pendingImageError.value = 'Invalid file type. Please upload an image file (JPG, PNG, etc.)'
+      pendingImageFile.value = null
+      pendingImagePreviewUrl.value = null
+    } else if (file.size > 12 * 1024 * 1024) {
+      pendingImageError.value = 'Image too large. Maximum size is 12MB.'
+      pendingImageFile.value = null
+      pendingImagePreviewUrl.value = null
+    }
+  }
+}
+
+const clearPendingImage = () => {
+  if (pendingImagePreviewUrl.value) {
+    URL.revokeObjectURL(pendingImagePreviewUrl.value)
+  }
+  pendingImageFile.value = null
+  pendingImagePreviewUrl.value = null
+  pendingImageError.value = null
+}
+
+const getDeviceImageSrc = (device: Device) => {
+  return api.getDeviceImageSrc(device.imageUrl, device.imageUpdatedAt)
+}
+
 const handleResetForm = () => {
   if (isEditing.value && editSnapshot.value) {
     newDevice.value = { ...editSnapshot.value.device }
@@ -184,7 +238,7 @@ const handleResetForm = () => {
       id: port.id,
       label: port.label,
       type: port.type,
-      patchbayId: port.patchbayId
+      patchbayId: port.patchbayId,
     }))
     aiStatusMessage.value = null
     return
@@ -199,111 +253,173 @@ const handleAiFileChange = async (event: Event) => {
   if (!file) return
 
   setAiImageFile(file)
+  // Also set as pending image for auto-attach
+  setPendingImageFile(file)
   aiStatusMessage.value = null
   aiLoading.value = true
 
   try {
     const device = await api.parseDeviceFromImage(file)
-    console.log('AI device parse response', device)
     newDevice.value = {
       name: device.name || '',
-      type: normalizeDeviceType(device.type)
+      type: normalizeDeviceType(device.type),
     }
     newPorts.value = device.ports.map((port) => ({
       label: port.label,
       type: port.type,
-      patchbayId: null
+      patchbayId: null,
     }))
-    aiStatusMessage.value = 'Formulario completado con AI. Revisalo y guarda.'
-    addDeviceMode.value = 'manual'
+    aiStatusMessage.value = t.devices.aiDraftReady
   } catch (err: any) {
-    showError(err.message || 'Error al procesar la imagen')
+    showError(err.message || strings.toast.imageParseFailed)
     console.error('Error parsing device image:', err)
   } finally {
     aiLoading.value = false
   }
 }
 
+const handleManualImageChange = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  
+  setPendingImageFile(file)
+}
+
 const handleAddDevice = async () => {
   if (newPorts.value.length === 0) {
-    showError('Debes agregar al menos un puerto')
+    showError(t.devices.validation.addPortFirst)
     return
   }
   if (!newDevice.value.name.trim()) {
-    showError('El nombre del dispositivo es requerido')
+    showError(t.devices.validation.nameRequired)
     return
   }
-  
+
   isLoading.value = true
-  
+
   try {
     const ports: DevicePort[] = newPorts.value.map((p) => ({
       id: p.id || '',
       label: p.label,
       type: p.type,
-      patchbayId: p.patchbayId ?? null
+      patchbayId: p.patchbayId ?? null,
     }))
 
+    let deviceId: number
+
     if (isEditing.value && editingDeviceId.value !== null) {
-      await store.updateDevice(editingDeviceId.value, {
+      const updated = await store.updateDevice(editingDeviceId.value, {
         name: newDevice.value.name,
         type: newDevice.value.type,
-        ports
+        ports,
       })
+      deviceId = updated.id
+      
+      // Update selectedDevice reference
+      if (selectedDevice.value?.id === deviceId) {
+        selectedDevice.value = updated
+      }
     } else {
-      await store.addDevice({
+      const created = await store.addDevice({
         name: newDevice.value.name,
         type: newDevice.value.type,
-        ports
+        ports,
       })
+      deviceId = created.id
     }
-    
+
+    // Upload image if one is pending
+    if (pendingImageFile.value) {
+      try {
+        isUploadingImage.value = true
+        const updatedDevice = await store.uploadDeviceImage(deviceId, pendingImageFile.value)
+        
+        // Update selectedDevice reference if needed
+        if (selectedDevice.value?.id === deviceId) {
+          selectedDevice.value = updatedDevice
+        }
+      } catch (imgErr: any) {
+        showError(`Device saved, but image upload failed: ${imgErr.message || 'Unknown error'}`)
+        console.error('Error uploading device image:', imgErr)
+      } finally {
+        isUploadingImage.value = false
+      }
+    }
+
+    store.pushToast({ type: 'success', message: strings.toast.deviceSaved })
     showAddModal.value = false
     editingDeviceId.value = null
     editSnapshot.value = null
     resetAddForm(true)
   } catch (err: any) {
-    showError(err.message || 'Error al guardar el dispositivo')
+    showError(err.message || strings.toast.deviceSaveFailed)
     console.error('Error saving device:', err)
   } finally {
     isLoading.value = false
   }
 }
 
-const handleDeleteDevice = async () => {
-  if (selectedDevice.value) {
-    if (confirm(`Are you sure you want to delete ${selectedDevice.value.name}?`)) {
-      isLoading.value = true
-      try {
-        await store.deleteDevice(selectedDevice.value.id)
-        closeDetail()
-      } catch (err: any) {
-        showError(err.message || 'Error al eliminar el dispositivo')
-        console.error('Error deleting device:', err)
-      } finally {
-        isLoading.value = false
-      }
+const requestDeleteDevice = (device: Device) => {
+  deleteTarget.value = device
+}
+
+const confirmDeleteDevice = async () => {
+  if (!deleteTarget.value) return
+  isLoading.value = true
+  try {
+    await store.deleteDevice(deleteTarget.value.id)
+    store.pushToast({ type: 'success', message: strings.toast.deviceDeleted })
+    if (selectedDevice.value?.id === deleteTarget.value.id) {
+      closeDetail()
     }
+  } catch (err: any) {
+    showError(err.message || strings.toast.deviceDeleteFailed)
+    console.error('Error deleting device:', err)
+  } finally {
+    isLoading.value = false
+    deleteTarget.value = null
   }
+}
+
+const cancelDeleteDevice = () => {
+  deleteTarget.value = null
 }
 
 const handleLinkPort = (port: DevicePort) => {
-  if (selectedDevice.value) {
-    // Close modal but keep reference if needed? No, store handles state
-    store.startLinkingPort(port.id)
-    // The store will switch tabs automatically
-  }
+  if (!selectedDevice.value) return
+  store.startLinkingPort({
+    portId: port.id,
+    deviceId: selectedDevice.value.id,
+    deviceName: selectedDevice.value.name,
+    portLabel: port.label,
+  }, {
+    returnTab: 'devices',
+    returnPayload: {
+      resume: 'devices',
+      deviceId: selectedDevice.value.id,
+      portId: port.id,
+      reopenDeviceDetail: true,
+    },
+  })
 }
 
 const handleUnlinkPort = async (port: DevicePort) => {
-  if (selectedDevice.value) {
-    try {
-      await store.unlinkPort(selectedDevice.value.id, port.id)
-    } catch (err: any) {
-      showError(err.message || 'Error al desvincular el puerto')
-      console.error('Error unlinking port:', err)
-    }
+  if (!selectedDevice.value) return
+  try {
+    await store.unlinkPort(selectedDevice.value.id, port.id)
+  } catch (err: any) {
+    showError(err.message || strings.toast.unlinkFailed)
+    console.error('Error unlinking port:', err)
   }
+}
+
+const handleGoToPatchbay = (port: DevicePort) => {
+  if (!port.patchbayId) return
+  store.highlightedPatchIds = [port.patchbayId]
+  store.patchbayFocusId = port.patchbayId
+  store.setTab('patchbay')
 }
 
 watch([newDevice, newPorts], () => {
@@ -312,92 +428,168 @@ watch([newDevice, newPorts], () => {
   }
 }, { deep: true })
 
+watch(() => store.activeTab, (tab) => {
+  if (tab !== 'devices') return
+  const payload = store.lastLinkReturnPayload as { resume?: string; deviceId?: number; reopenDeviceDetail?: boolean } | null
+  if (!payload || payload.resume !== 'devices' || !payload.reopenDeviceDetail) return
+  const deviceId = payload.deviceId
+  if (!deviceId) return
+  const device = store.devices.find(item => item.id === deviceId)
+  if (device) {
+    selectedDevice.value = device
+  }
+  store.clearLinkReturnPayload()
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewport)
   if (aiPreviewUrl.value) {
     URL.revokeObjectURL(aiPreviewUrl.value)
+  }
+  if (pendingImagePreviewUrl.value) {
+    URL.revokeObjectURL(pendingImagePreviewUrl.value)
   }
 })
 </script>
 
 <template>
   <div class="devices-container">
-    <!-- Error Toast -->
-    <div v-if="errorMessage" class="error-toast" @click="clearError">
-      <span class="error-icon">⚠️</span>
-      <span class="error-text">{{ errorMessage }}</span>
-      <button class="error-close">×</button>
-    </div>
-
-    <!-- Loading Overlay -->
-    <div v-if="isLoading || aiLoading" class="loading-overlay">
-      <div class="loading-spinner"></div>
-      <p v-if="aiLoading" class="loading-text">Analizando imagen...</p>
-    </div>
-
     <div class="header">
-      <h2>Devices Management</h2>
+      <div class="title-block">
+        <h2>{{ t.devices.title }}</h2>
+        <span v-if="isLoading" class="status-pill">{{ t.devices.saving }}</span>
+      </div>
       <div class="header-actions">
-        <input 
-          v-model="searchQuery" 
-          placeholder="Search devices..." 
+        <input
+          v-model="searchQuery"
+          :placeholder="t.devices.searchPlaceholder"
           class="search-input"
         />
-        <button class="add-btn" @click="openAddModal">Add Device</button>
+        <button class="add-btn" @click="openAddModal">{{ t.devices.addDevice }}</button>
       </div>
     </div>
 
-    <div class="devices-list">
-      <div 
-        v-for="device in filteredDevices" 
-        :key="device.id" 
-        class="device-card"
-        @click="selectDevice(device)"
-      >
-        <div class="device-header">
-          <h3>{{ device.name }}</h3>
-          <div class="device-meta">
-            <span class="device-type">{{ device.type }}</span>
-            <button class="edit-btn" @click.stop="openEditModal(device)" aria-label="Edit device">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 16.25V20h3.75L19.81 7.94l-3.75-3.75L4 16.25zm14.71-9.46a1 1 0 0 0 0-1.41l-1.09-1.09a1 1 0 0 0-1.41 0l-1.13 1.13 3.75 3.75 1.88-1.88z"/>
-              </svg>
-            </button>
+    <div class="devices-layout">
+      <div class="devices-list">
+        <div
+          v-for="device in filteredDevices"
+          :key="device.id"
+          class="device-card"
+          :class="{ active: selectedDevice?.id === device.id }"
+          @click="selectDevice(device)"
+        >
+          <div v-if="device.imageUrl" class="device-thumbnail">
+            <img :src="getDeviceImageSrc(device)" :alt="device.name" />
+          </div>
+          <div v-else class="device-thumbnail-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          </div>
+          <div class="device-header">
+            <h3>{{ device.name }}</h3>
+            <div class="device-meta">
+              <span class="device-type">{{ device.type }}</span>
+              <button class="edit-btn" @click.stop="openEditModal(device)" :aria-label="t.devices.editDevice">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 16.25V20h3.75L19.81 7.94l-3.75-3.75L4 16.25zm14.71-9.46a1 1 0 0 0 0-1.41l-1.09-1.09a1 1 0 0 0-1.41 0l-1.13 1.13 3.75 3.75 1.88-1.88z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div class="device-info">
+            <span>{{ t.devices.portsCount(device.ports.length) }}</span>
           </div>
         </div>
-        <div class="device-info">
-          <span>{{ device.ports.length }} Ports</span>
-        </div>
       </div>
-    </div>
 
-    <!-- Device Detail Modal -->
-    <div v-if="selectedDevice" class="modal-overlay" @click="closeDetail">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h2>{{ selectedDevice.name }}</h2>
-          <button class="close-btn" @click="closeDetail">×</button>
+      <div v-if="selectedDevice && isDesktop" class="device-detail-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <h3>{{ selectedDevice.name }}</h3>
+            <span class="device-type">{{ selectedDevice.type }}</span>
+          </div>
+          <div class="panel-actions">
+            <button class="ghost-btn" @click="openEditModal(selectedDevice)">{{ t.devices.editDevice }}</button>
+            <button class="ghost-btn" @click="closeDetail">{{ t.devices.closeDetail }}</button>
+          </div>
         </div>
-        
+
         <div class="device-details">
-          <p><strong>Type:</strong> {{ selectedDevice.type }}</p>
-          <p><strong>ID:</strong> {{ selectedDevice.id }}</p>
+          <div v-if="selectedDevice.imageUrl" class="device-detail-image">
+            <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+          </div>
           
-          <h3>Ports Configuration</h3>
+          <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
+          <p><strong>{{ t.devices.idLabel }}:</strong> {{ selectedDevice.id }}</p>
+
+          <h4>{{ t.devices.portsConfig }}</h4>
           <div class="ports-list">
             <div v-for="port in selectedDevice.ports" :key="port.id" class="port-item">
               <div class="port-info">
                 <span class="port-label">{{ port.label }}</span>
-                <span class="port-type" :class="port.type.toLowerCase()">{{ port.type }}</span>
+                <span class="port-type">{{ t.devices.portTypes[port.type] }}</span>
               </div>
-              
+
               <div class="port-actions">
-                <span class="port-connection" v-if="port.patchbayId">
-                  Linked to #{{ port.patchbayId }}
-                  <button class="link-action-btn unlink" @click.stop="handleUnlinkPort(port)">Unlink</button>
+                <span v-if="port.patchbayId" class="port-connection">
+                  {{ t.devices.linkedTo(port.patchbayId) }}
+                  <button class="link-action-btn unlink" @click.stop="handleUnlinkPort(port)">{{ t.devices.unlink }}</button>
+                  <button class="link-action-btn ghost" @click.stop="handleGoToPatchbay(port)">
+                    {{ t.devices.goToPatch(port.patchbayId) }}
+                  </button>
                 </span>
-                <span class="port-connection empty" v-else>
-                  Not Connected
-                  <button class="link-action-btn link" @click.stop="handleLinkPort(port)">Link</button>
+                <span v-else class="port-connection empty">
+                  {{ t.devices.notConnected }}
+                  <button class="link-action-btn link" @click.stop="handleLinkPort(port)">{{ t.devices.link }}</button>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="delete-btn" @click="requestDeleteDevice(selectedDevice)">{{ t.devices.deleteDevice }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="selectedDevice && !isDesktop" class="modal-overlay" @click="closeDetail">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h2>{{ selectedDevice.name }}</h2>
+          <button class="close-btn" @click="closeDetail">{{ t.app.closeSymbol }}</button>
+        </div>
+
+        <div class="device-details">
+          <div v-if="selectedDevice.imageUrl" class="device-detail-image">
+            <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+          </div>
+          
+          <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
+          <p><strong>{{ t.devices.idLabel }}:</strong> {{ selectedDevice.id }}</p>
+
+          <h3>{{ t.devices.portsConfig }}</h3>
+          <div class="ports-list">
+            <div v-for="port in selectedDevice.ports" :key="port.id" class="port-item">
+              <div class="port-info">
+                <span class="port-label">{{ port.label }}</span>
+                <span class="port-type">{{ t.devices.portTypes[port.type] }}</span>
+              </div>
+
+              <div class="port-actions">
+                <span v-if="port.patchbayId" class="port-connection">
+                  {{ t.devices.linkedTo(port.patchbayId) }}
+                  <button class="link-action-btn unlink" @click.stop="handleUnlinkPort(port)">{{ t.devices.unlink }}</button>
+                  <button class="link-action-btn ghost" @click.stop="handleGoToPatchbay(port)">
+                    {{ t.devices.goToPatch(port.patchbayId) }}
+                  </button>
+                </span>
+                <span v-else class="port-connection empty">
+                  {{ t.devices.notConnected }}
+                  <button class="link-action-btn link" @click.stop="handleLinkPort(port)">{{ t.devices.link }}</button>
                 </span>
               </div>
             </div>
@@ -405,17 +597,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="modal-actions">
-          <button class="delete-btn" @click="handleDeleteDevice">Delete Device</button>
+          <button class="delete-btn" @click="requestDeleteDevice(selectedDevice)">{{ t.devices.deleteDevice }}</button>
         </div>
       </div>
     </div>
 
-    <!-- Add Device Modal -->
     <div v-if="showAddModal" class="modal-overlay" @click="closeAddModal">
       <div class="modal-content small add-device-modal" @click.stop>
         <div class="modal-header">
-          <h2>{{ isEditing ? 'Edit Device' : 'Add New Device' }}</h2>
-          <button class="close-btn" @click="closeAddModal">×</button>
+          <h2>{{ isEditing ? t.devices.editDevice : t.devices.addNewDevice }}</h2>
+          <button class="close-btn" @click="closeAddModal">{{ t.app.closeSymbol }}</button>
         </div>
         <div class="add-device-tabs">
           <button
@@ -423,58 +614,82 @@ onBeforeUnmount(() => {
             :class="{ active: addDeviceMode === 'manual' }"
             @click="addDeviceMode = 'manual'"
           >
-            Manual
+            {{ t.devices.tabManual }}
           </button>
           <button
             class="tab-btn"
             :class="{ active: addDeviceMode === 'ai' }"
             @click="addDeviceMode = 'ai'"
           >
-            AI
+            {{ t.devices.tabAutoDetect }}
           </button>
         </div>
         <div class="form-content">
           <div v-if="addDeviceMode === 'manual'" class="manual-form">
             <div class="form-group">
-              <label>Name</label>
-              <input v-model="newDevice.name" placeholder="Device Name" />
+              <label>{{ t.devices.nameLabel }}</label>
+              <input v-model="newDevice.name" :placeholder="t.devices.namePlaceholder" />
             </div>
             <div class="form-group">
-              <label>Type</label>
+              <label>{{ t.devices.typeLabel }}</label>
               <select v-model="newDevice.type">
                 <option v-for="option in deviceTypeOptions" :key="option" :value="option">
                   {{ option }}
                 </option>
               </select>
             </div>
+            <div class="form-group">
+              <label>Device Image (optional)</label>
+              <p class="help-text">Maximum 12MB. Supported formats: JPG, PNG, WebP</p>
+              <label class="ai-upload-btn">
+                {{ pendingImagePreviewUrl || (isEditing && selectedDevice?.imageUrl) ? 'Change Image' : 'Upload Image' }}
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  @change="handleManualImageChange"
+                  class="ai-file-input"
+                />
+              </label>
+              <div v-if="pendingImageError" class="error-text">{{ pendingImageError }}</div>
+              <div v-if="pendingImagePreviewUrl" class="ai-preview">
+                <img :src="pendingImagePreviewUrl" alt="Preview" />
+              </div>
+              <div v-else-if="isEditing && selectedDevice?.imageUrl && !pendingImageFile" class="ai-preview">
+                <img :src="getDeviceImageSrc(selectedDevice)" :alt="selectedDevice.name" />
+              </div>
+              <button v-if="pendingImagePreviewUrl" class="ghost-btn" @click="clearPendingImage" type="button" style="margin-top: 8px;">Remove Image</button>
+            </div>
             <div class="form-group ports-section">
               <div class="ports-header">
-                <label>Ports</label>
-                <button class="add-port-btn" @click="addPort">+ Add Port</button>
+                <label>{{ t.devices.portsLabel }}</label>
+                <button class="add-port-btn" @click="addPort">{{ t.devices.addPort }}</button>
               </div>
               <div class="ports-editor">
                 <div v-for="(port, index) in newPorts" :key="index" class="port-edit-row">
-                  <input v-model="port.label" placeholder="Port name" class="port-name-input" />
+                  <input v-model="port.label" :placeholder="t.devices.portNamePlaceholder" class="port-name-input" />
                   <select v-model="port.type" class="port-type-select">
-                    <option value="Input">Input</option>
-                    <option value="Output">Output</option>
-                    <option value="Other">Other</option>
+                    <option v-for="option in portTypeOptions" :key="option" :value="option">
+                      {{ t.devices.portTypes[option] }}
+                    </option>
                   </select>
-                  <button class="remove-port-btn" @click="removePort(index)">A-</button>
+                  <button class="remove-port-btn" @click="removePort(index)">{{ t.devices.removePort }}</button>
                 </div>
                 <div v-if="newPorts.length === 0" class="ports-empty">
-                  No hay puertos agregados
+                  {{ t.devices.noPorts }}
                 </div>
               </div>
             </div>
           </div>
 
           <div v-else class="ai-form">
-            <p class="ai-help">
-              Subi o saca una foto del dispositivo, idealmente del puerto.
-            </p>
+            <div class="ai-stepper">
+              <span :class="{ active: aiStep === 'upload' }">{{ t.devices.aiSteps.upload }}</span>
+              <span :class="{ active: aiStep === 'processing' }">{{ t.devices.aiSteps.processing }}</span>
+              <span :class="{ active: aiStep === 'review' }">{{ t.devices.aiSteps.review }}</span>
+            </div>
+            <p class="ai-help">{{ t.devices.aiHelp }}</p>
             <label class="ai-upload-btn">
-              Subir o sacar foto
+              {{ t.devices.aiUpload }}
               <input
                 class="ai-file-input"
                 type="file"
@@ -485,120 +700,169 @@ onBeforeUnmount(() => {
             </label>
             <div v-if="aiPreviewUrl" class="ai-preview">
               <img :src="aiPreviewUrl" alt="Device preview" />
+              <p class="help-text">This image will be attached to the device when you save.</p>
+            </div>
+            <div v-if="aiLoading" class="ai-progress">
+              <span class="spinner"></span>
+              <span>{{ t.devices.aiProcessing }}</span>
             </div>
             <div v-if="aiStatusMessage" class="ai-status">
               {{ aiStatusMessage }}
+              <button class="ghost-btn" @click="addDeviceMode = 'manual'">
+                {{ t.devices.aiReviewDraft }}
+              </button>
             </div>
           </div>
         </div>
         <div class="form-footer">
-          <button class="reset-btn" @click="handleResetForm" type="button">Reset Form</button>
-          <button class="save-btn" @click="handleAddDevice" :disabled="!newDevice.name || newPorts.length === 0">
-            {{ isEditing ? 'Update Device' : 'Create Device' }}
+          <button class="reset-btn" @click="handleResetForm" type="button">{{ t.devices.resetForm }}</button>
+          <button 
+            class="save-btn" 
+            @click="handleAddDevice" 
+            :disabled="!newDevice.name || newPorts.length === 0 || isUploadingImage"
+          >
+            <span v-if="isUploadingImage">Uploading image...</span>
+            <span v-else>{{ isEditing ? t.devices.updateDevice : t.devices.createDevice }}</span>
           </button>
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      v-if="deleteTarget"
+      :title="t.confirm.deleteDeviceTitle"
+      :message="t.confirm.deleteDeviceMessage(deleteTarget.name)"
+      @confirm="confirmDeleteDevice"
+      @cancel="cancelDeleteDevice"
+    />
   </div>
 </template>
 
 <style scoped>
 .devices-container {
-  padding: 20px;
-  color: #e2e8f0;
+  padding: var(--space-5);
+  color: var(--text-primary);
   height: 100%;
   overflow: auto;
+  background: var(--surface-1);
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-1);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-4);
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
+}
+
+.title-block {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.status-pill {
+  padding: 4px 10px;
+  border-radius: var(--radius-round);
+  background: rgba(212, 154, 79, 0.2);
+  border: 1px solid rgba(212, 154, 79, 0.5);
+  color: var(--warning);
+  font-size: 0.8rem;
 }
 
 .header-actions {
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .search-input {
   padding: 8px 12px;
-  background-color: #1a202c;
-  border: 1px solid #4a5568;
-  color: white;
-  border-radius: 4px;
-  min-width: 200px;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-radius: var(--radius-2);
+  min-width: 220px;
 }
 
 .add-btn {
-  background-color: #48bb78;
-  color: white;
+  background-color: var(--accent);
+  color: #0f120e;
   border: none;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  font-weight: bold;
+  font-weight: 600;
+}
+
+.devices-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) 1fr;
+  gap: var(--space-4);
 }
 
 .devices-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .device-card {
-  background-color: #2d3748;
-  border: 1px solid #4a5568;
-  border-radius: 8px;
-  padding: 15px;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-3);
+  padding: var(--space-3);
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 
 .device-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-  background-color: #364156;
+  box-shadow: var(--shadow-1);
+}
+
+.device-card.active {
+  border-color: rgba(61, 122, 88, 0.6);
 }
 
 .device-header {
   display: flex;
   justify-content: space-between;
   align-items: start;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-2);
 }
 
 .device-header h3 {
   margin: 0;
   font-size: 1.1rem;
-  color: #fff;
+  color: var(--text-primary);
 }
 
 .device-type {
   font-size: 0.8rem;
-  background-color: #4a5568;
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: #a0aec0;
+  background-color: var(--surface-3);
+  padding: 2px 8px;
+  border-radius: var(--radius-2);
+  color: var(--text-secondary);
 }
 
 .device-meta {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .edit-btn {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
-  border: 1px solid #4a5568;
-  background-color: #1a202c;
-  color: #e2e8f0;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
+  background-color: var(--surface-1);
+  color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -612,180 +876,81 @@ onBeforeUnmount(() => {
 }
 
 .edit-btn:hover {
-  border-color: #4299e1;
-  color: #63b3ed;
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 .device-info {
   font-size: 0.9rem;
-  color: #cbd5e0;
+  color: var(--text-secondary);
 }
 
-/* Modal Styles */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.7);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background-color: #2d3748;
-  width: 90%;
-  max-width: 600px;
-  max-height: 80vh;
-  border-radius: 8px;
+.device-detail-panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-3);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  gap: var(--space-4);
+  min-height: 360px;
 }
 
-.modal-content.small {
-  max-width: 400px;
-}
-
-.modal-content.add-device-modal {
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-content.add-device-modal .form-content {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.add-device-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 10px 20px;
-  border-bottom: 1px solid #4a5568;
-  background-color: #2d3748;
-}
-
-.tab-btn {
-  flex: 1;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #4a5568;
-  background-color: #1a202c;
-  color: #cbd5e0;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.tab-btn.active {
-  background-color: #4299e1;
-  color: #fff;
-  border-color: #4299e1;
-}
-
-.form-footer {
-  padding: 15px 20px;
-  border-top: 1px solid #4a5568;
-  background-color: #2d3748;
-  display: flex;
-  gap: 10px;
-}
-
-.form-footer .save-btn {
-  flex: 1;
-  margin-top: 0;
-}
-
-.reset-btn {
-  background-color: #4a5568;
-  color: white;
-  border: none;
-  padding: 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-  flex: 1;
-}
-
-.modal-header {
-  padding: 20px;
-  border-bottom: 1px solid #4a5568;
+.panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: var(--space-2);
 }
 
-.modal-header h2 {
-  margin: 0;
-  color: white;
+.panel-title h3 {
+  margin: 0 0 4px;
 }
 
-.close-btn {
-  background: none;
-  border: none;
-  color: #a0aec0;
-  font-size: 1.5rem;
-  cursor: pointer;
+.panel-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
-.device-details {
-  padding: 20px;
-  overflow-y: auto;
+.device-details h4 {
+  margin-top: var(--space-4);
 }
 
 .ports-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .port-item {
-  background-color: #1a202c;
-  padding: 8px 12px;
-  border-radius: 4px;
+  background-color: var(--surface-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-2);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border: 1px solid var(--border-default);
 }
 
 .port-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .port-label {
-  font-weight: bold;
-  color: #e2e8f0;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .port-type {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-1);
   text-transform: uppercase;
-}
-
-.port-type.input {
-  background-color: #2c5282;
-  color: #bee3f8;
-}
-
-.port-type.output {
-  background-color: #276749;
-  color: #c6f6d5;
-}
-
-.port-type.other {
-  background-color: #744210;
-  color: #fefcbf;
+  background: var(--surface-3);
+  color: var(--text-muted);
 }
 
 .port-actions {
@@ -795,59 +960,192 @@ onBeforeUnmount(() => {
 
 .port-connection {
   font-size: 0.85rem;
-  color: #63b3ed;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .port-connection.empty {
-  color: #718096;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .link-action-btn {
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-1);
   border: none;
   cursor: pointer;
   font-size: 0.8rem;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .link-action-btn.link {
-  background-color: #4299e1;
-  color: white;
+  background-color: var(--accent);
+  color: #0f120e;
 }
 
 .link-action-btn.unlink {
-  background-color: #e53e3e;
-  color: white;
+  background-color: var(--danger);
+  color: #fef7ee;
 }
 
-.modal-actions {
-  padding: 20px;
-  border-top: 1px solid #4a5568;
+.link-action-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.panel-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
 }
 
 .delete-btn {
-  background-color: #e53e3e;
-  color: white;
+  background-color: var(--danger);
+  color: #fef7ee;
   border: none;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
 }
 
-/* Form Styles */
-.form-content {
-  padding: 20px;
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(7, 6, 5, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background-color: var(--surface-2);
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  border-radius: var(--radius-3);
   display: flex;
   flex-direction: column;
-  gap: 15px;
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--border-default);
+}
+
+.modal-content.small {
+  max-width: 420px;
+}
+
+.modal-content.add-device-modal {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 520px;
+}
+
+.modal-content.add-device-modal .form-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.manual-form,
+.ai-form {
+  padding: var(--space-4);
+}
+
+.add-device-tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+  background-color: var(--surface-2);
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
+  background-color: var(--surface-1);
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  background-color: var(--accent);
+  color: #0f120e;
+  border-color: var(--accent);
+}
+
+.form-footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border-default);
+  background-color: var(--surface-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.form-footer .save-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+.reset-btn {
+  background-color: var(--surface-3);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  padding: 10px;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  font-weight: 600;
+  flex: 1;
+}
+
+.modal-header {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.device-details {
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.modal-actions {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.form-content {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
 .form-group {
@@ -857,26 +1155,40 @@ onBeforeUnmount(() => {
 }
 
 .form-group label {
-  color: #a0aec0;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
-.form-group input, .form-group select {
+.form-group input,
+.form-group select {
   padding: 8px;
-  background-color: #1a202c;
-  border: 1px solid #4a5568;
-  border-radius: 4px;
-  color: white;
+  background-color: var(--surface-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
 }
 
 .ai-form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
+}
+
+.ai-stepper {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
+.ai-stepper span.active {
+  color: var(--accent-2);
 }
 
 .ai-help {
-  color: #a0aec0;
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
@@ -885,10 +1197,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px dashed #718096;
-  background-color: #1a202c;
-  color: #e2e8f0;
+  border-radius: var(--radius-2);
+  border: 1px dashed var(--border-default);
+  background-color: var(--surface-1);
+  color: var(--text-primary);
   cursor: pointer;
   font-weight: 600;
 }
@@ -898,8 +1210,8 @@ onBeforeUnmount(() => {
 }
 
 .ai-preview {
-  border-radius: 8px;
-  border: 1px solid #4a5568;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
   overflow: hidden;
   max-height: 200px;
 }
@@ -911,54 +1223,54 @@ onBeforeUnmount(() => {
   object-fit: cover;
 }
 
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
 .ai-status {
-  color: #9ae6b4;
+  color: var(--accent-2);
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
 .save-btn {
-  background-color: #48bb78;
-  color: white;
+  background-color: var(--accent);
+  color: #0f120e;
   border: none;
   padding: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  font-weight: bold;
+  font-weight: 600;
   margin-top: 10px;
 }
 
 .save-btn:disabled {
-  background-color: #2f855a;
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Ports Editor Styles */
 .ports-editor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   max-height: 200px;
   overflow-y: auto;
   padding-right: 4px;
-}
-
-.ports-editor::-webkit-scrollbar {
-  width: 6px;
-}
-
-.ports-editor::-webkit-scrollbar-track {
-  background: #1a202c;
-  border-radius: 3px;
-}
-
-.ports-editor::-webkit-scrollbar-thumb {
-  background: #4a5568;
-  border-radius: 3px;
-}
-
-.ports-editor::-webkit-scrollbar-thumb:hover {
-  background: #718096;
 }
 
 .ports-section {
@@ -975,10 +1287,6 @@ onBeforeUnmount(() => {
   margin-bottom: 8px;
 }
 
-.ports-header label {
-  margin: 0;
-}
-
 .ports-header .add-port-btn {
   margin: 0;
   padding: 4px 10px;
@@ -986,143 +1294,145 @@ onBeforeUnmount(() => {
 }
 
 .ports-empty {
-  color: #718096;
+  color: var(--text-muted);
   font-style: italic;
   text-align: center;
-  padding: 20px;
-  background-color: #1a202c;
-  border-radius: 4px;
-  border: 1px dashed #4a5568;
+  padding: var(--space-4);
+  background-color: var(--surface-1);
+  border-radius: var(--radius-2);
+  border: 1px dashed var(--border-default);
 }
 
 .port-edit-row {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .port-name-input {
   flex: 1;
   padding: 6px 8px;
-  background-color: #1a202c;
-  border: 1px solid #4a5568;
-  border-radius: 4px;
-  color: white;
+  background-color: var(--surface-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
 }
 
 .port-type-select {
   padding: 6px 8px;
-  background-color: #1a202c;
-  border: 1px solid #4a5568;
-  border-radius: 4px;
-  color: white;
-  min-width: 80px;
+  background-color: var(--surface-1);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  color: var(--text-primary);
+  min-width: 90px;
 }
 
 .remove-port-btn {
-  background-color: #e53e3e;
-  color: white;
+  background-color: var(--danger);
+  color: #fef7ee;
   border: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  font-size: 1rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 0.8rem;
 }
 
 .add-port-btn {
-  background-color: #4a5568;
-  color: white;
-  border: 1px dashed #718096;
+  background-color: var(--surface-3);
+  color: var(--text-primary);
+  border: 1px dashed var(--border-default);
   padding: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
   margin-top: 4px;
 }
 
-.add-port-btn:hover {
-  background-color: #4299e1;
-  border-color: #4299e1;
+.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  font-weight: 600;
 }
 
-/* Error Toast */
-.error-toast {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  background-color: #c53030;
-  color: white;
-  padding: 12px 20px;
-  border-radius: 8px;
+/* Device image styles */
+.device-thumbnail {
+  width: 100%;
+  height: 100px;
+  overflow: hidden;
+  border-radius: var(--radius-2);
+  margin-bottom: var(--space-2);
+}
+
+.device-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.device-thumbnail-placeholder {
+  width: 100%;
+  height: 100px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 2000;
-  cursor: pointer;
-  animation: slideIn 0.3s ease-out;
+  justify-content: center;
+  background-color: var(--surface-3);
+  border-radius: var(--radius-2);
+  margin-bottom: var(--space-2);
+  color: var(--text-muted);
 }
 
-@keyframes slideIn {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+.device-thumbnail-placeholder svg {
+  width: 32px;
+  height: 32px;
+  stroke-width: 1.5;
 }
 
-.error-icon {
-  font-size: 1.2rem;
+.device-detail-image {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: var(--space-4);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+}
+
+.device-detail-image img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.image-preview {
+  margin-top: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
+  padding: var(--space-2);
+  background-color: var(--surface-1);
+}
+
+.image-preview img {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  display: block;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-2);
+}
+
+.help-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  margin-bottom: 0;
 }
 
 .error-text {
-  flex: 1;
-  font-size: 0.95rem;
-}
-
-.error-close {
-  background: none;
-  border: none;
-  color: white;
-  font-size: 1.2rem;
-  cursor: pointer;
-  padding: 0;
-  margin-left: 10px;
-}
-
-/* Loading Overlay */
-.loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1500;
-}
-
-.loading-text {
-  margin-top: 12px;
-  color: #e2e8f0;
-  font-size: 0.95rem;
-}
-
-.loading-spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid #4a5568;
-  border-top-color: #4299e1;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+  font-size: 0.85rem;
+  color: var(--danger);
+  margin-top: 4px;
 }
 
 @keyframes spin {
@@ -1130,5 +1440,14 @@ onBeforeUnmount(() => {
     transform: rotate(360deg);
   }
 }
-</style>
 
+@media (max-width: 1024px) {
+  .devices-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .device-detail-panel {
+    display: none;
+  }
+}
+</style>

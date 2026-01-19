@@ -1,16 +1,53 @@
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  --font-ui: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-display: "Cormorant Garamond", "Times New Roman", serif;
+
+  --surface-bg: #161411;
+  --surface-1: #1f1c18;
+  --surface-2: #26221d;
+  --surface-3: #2f2a23;
+
+  --text-primary: #f2eadc;
+  --text-secondary: #b7b0a3;
+  --text-muted: #8d877a;
+
+  --border-default: #3b352c;
+
+  --accent: #3d7a58;
+  --accent-2: #6aa36f;
+  --danger: #b04b3d;
+  --warning: #d49a4f;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --radius-3: 12px;
+  --radius-4: 18px;
+  --radius-round: 999px;
+
+  --shadow-1: 0 8px 20px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 16px 40px rgba(0, 0, 0, 0.35);
+
+  font-family: var(--font-ui);
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color: var(--text-primary);
+  background-color: var(--surface-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -18,4 +55,44 @@ body {
   padding: 0;
   min-width: 320px;
   min-height: 100vh;
+  background-color: var(--surface-bg);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(61, 122, 88, 0.18), transparent 45%),
+    radial-gradient(circle at 80% 10%, rgba(212, 154, 79, 0.1), transparent 35%),
+    linear-gradient(180deg, rgba(22, 20, 17, 0.95), rgba(12, 11, 9, 0.98));
+  z-index: -1;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

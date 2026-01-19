@@ -12,4 +12,4 @@ services:
 
 networks:
   pepper-network:
-    external: true
+    driver: bridge

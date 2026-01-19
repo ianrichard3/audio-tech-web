@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { store, type PatchBayNode, type Device, type DevicePort } from '../store'
+import ConfirmDialog from '../ui/ConfirmDialog.vue'
+import { strings } from '../ui/strings'
 
+const t = strings
 const nodes = computed(() => store.patchbayNodes)
 const selectedCell = ref<PatchBayNode | null>(null)
 const showLinkSearch = ref(false)
 const searchQuery = ref('')
 const gridSearchQuery = ref('')
+const showOverwriteConfirm = ref(false)
+const overwriteTarget = ref<{ node: PatchBayNode; deviceName: string; portLabel: string } | null>(null)
+
+const rowLabels = t.patchbay.rowLabels
+const columnLabels = Array.from({ length: 48 }, (_, index) => index + 1)
 
 // Helper to get connection info
 const getConnection = (patchbayId: number) => {
@@ -20,17 +28,15 @@ const isLinked = (patchbayId: number) => {
 const isMatch = (node: PatchBayNode) => {
   if (!gridSearchQuery.value) return false
   const query = gridSearchQuery.value.toLowerCase()
-  
-  // Check node name
+
   if (node.name.toLowerCase().includes(query)) return true
-  
-  // Check connected device
+
   const connection = getConnection(node.id)
   if (connection) {
     if (connection.device.name.toLowerCase().includes(query)) return true
     if (connection.port.label.toLowerCase().includes(query)) return true
   }
-  
+
   return false
 }
 
@@ -38,19 +44,37 @@ const isHighlightedConnection = (patchbayId: number) => {
   return store.highlightedPatchIds.includes(patchbayId)
 }
 
+const selectionBannerText = computed(() => {
+  if (store.pendingLink) {
+    return t.patchbay.linkingBanner(store.pendingLink.deviceName, store.pendingLink.portLabel)
+  }
+  return t.patchbay.linkingFallback
+})
+
+const getSectionNodes = (sectionIndex: number) => {
+  return nodes.value.slice((sectionIndex - 1) * 96, sectionIndex * 96)
+}
+
+const getCellTooltip = (patchbayId: number) => {
+  const connection = getConnection(patchbayId)
+  if (!connection) return ''
+  return t.patchbay.tooltip(connection.device.name, connection.port.label)
+}
+
 const handleCellClick = async (node: PatchBayNode) => {
   if (store.selectionMode) {
-    // We are in "Link Mode" coming from Devices tab
-    // Check if already occupied?
     const existing = getConnection(node.id)
     if (existing) {
-      if (!confirm(`This slot is already connected to ${existing.device.name} - ${existing.port.label}. Overwrite?`)) {
-        return
+      overwriteTarget.value = {
+        node,
+        deviceName: existing.device.name,
+        portLabel: existing.port.label,
       }
+      showOverwriteConfirm.value = true
+      return
     }
     await store.completeLink(node.id)
   } else {
-    // Normal mode: show details
     selectedCell.value = node
   }
 }
@@ -74,6 +98,19 @@ const openLinkSearch = () => {
   showLinkSearch.value = true
 }
 
+const confirmOverwrite = async () => {
+  if (overwriteTarget.value) {
+    await store.completeLink(overwriteTarget.value.node.id)
+  }
+  showOverwriteConfirm.value = false
+  overwriteTarget.value = null
+}
+
+const cancelOverwrite = () => {
+  showOverwriteConfirm.value = false
+  overwriteTarget.value = null
+}
+
 // Search Logic
 const filteredDevices = computed(() => {
   if (!searchQuery.value) return store.devices
@@ -87,41 +124,85 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
     closePopup()
   }
 }
+
+watch(() => store.patchbayFocusId, async (focusId) => {
+  if (!focusId) return
+  await nextTick()
+  const target = document.querySelector(`[data-patch-id=\"${focusId}\"]`) as HTMLElement | null
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+  }
+  store.patchbayFocusId = null
+})
 </script>
 
 <template>
   <div class="main-container" :class="{ 'selection-mode': store.selectionMode }">
     <div class="top-controls">
       <div v-if="store.selectionMode" class="selection-banner">
-        Select a patch point to link...
-        <button @click="store.cancelLinking()">Cancel</button>
+        <span>{{ selectionBannerText }}</span>
+        <button @click="store.cancelLinking()">{{ t.patchbay.cancel }}</button>
       </div>
 
       <div v-if="store.highlightedPatchIds.length > 0" class="highlight-banner">
-        🔌 Mostrando conexión: <strong>#{{ store.highlightedPatchIds[0] }}</strong> ↔ <strong>#{{ store.highlightedPatchIds[1] }}</strong>
-        <button @click="store.highlightedPatchIds = []">Limpiar</button>
+        <span>{{ t.patchbay.showingConnection(store.highlightedPatchIds[0], store.highlightedPatchIds[1]) }}</span>
+        <button @click="store.highlightedPatchIds = []">{{ t.patchbay.clearHighlights }}</button>
       </div>
 
       <div class="grid-controls">
-        <input 
-          v-model="gridSearchQuery" 
-          placeholder="Search patchbay (point or device)..." 
+        <input
+          v-model="gridSearchQuery"
+          :placeholder="t.patchbay.searchPlaceholder"
           class="grid-search-input"
         />
+        <div class="grid-legend">
+          <span class="legend-title">{{ t.patchbay.legendTitle }}</span>
+          <span class="legend-chip linked">{{ t.patchbay.legendLinked }}</span>
+          <span class="legend-chip open">{{ t.patchbay.legendOpen }}</span>
+          <span class="legend-chip match">{{ t.patchbay.legendMatch }}</span>
+          <span class="legend-chip highlight">{{ t.patchbay.legendHighlight }}</span>
+        </div>
       </div>
     </div>
 
     <div class="grid-wrapper">
       <div v-for="sectionIndex in 3" :key="sectionIndex" class="grid-section" :class="'section-' + sectionIndex">
-        <div 
-          v-for="item in nodes.slice((sectionIndex - 1) * 96, sectionIndex * 96)" 
-          :key="item.id" 
+        <div class="grid-corner"></div>
+        <div v-for="col in columnLabels" :key="`col-${sectionIndex}-${col}`" class="grid-col-label">
+          {{ col }}
+        </div>
+        <div class="grid-row-label">{{ rowLabels[0] }}</div>
+        <div
+          v-for="item in getSectionNodes(sectionIndex).slice(0, 48)"
+          :key="item.id"
           class="grid-cell"
-          :class="{ 
-            'linked': isLinked(item.id),
+          :class="{
+            linked: isLinked(item.id),
+            open: !isLinked(item.id),
             'highlight-match': isMatch(item),
-            'highlight-connection': isHighlightedConnection(item.id)
+            'highlight-connection': isHighlightedConnection(item.id),
           }"
+          :data-patch-id="item.id"
+          :data-tooltip="getCellTooltip(item.id) || null"
+          @click="handleCellClick(item)"
+        >
+          <div class="cell-content">
+            <span class="cell-text">{{ item.id }}</span>
+          </div>
+        </div>
+        <div class="grid-row-label">{{ rowLabels[1] }}</div>
+        <div
+          v-for="item in getSectionNodes(sectionIndex).slice(48, 96)"
+          :key="item.id"
+          class="grid-cell"
+          :class="{
+            linked: isLinked(item.id),
+            open: !isLinked(item.id),
+            'highlight-match': isMatch(item),
+            'highlight-connection': isHighlightedConnection(item.id),
+          }"
+          :data-patch-id="item.id"
+          :data-tooltip="getCellTooltip(item.id) || null"
           @click="handleCellClick(item)"
         >
           <div class="cell-content">
@@ -131,41 +212,54 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
       </div>
     </div>
 
-    <!-- Cell Details Modal -->
+    <ConfirmDialog
+      v-if="showOverwriteConfirm && overwriteTarget"
+      :title="t.confirm.overwriteTitle"
+      :message="t.confirm.overwriteMessage(overwriteTarget.deviceName, overwriteTarget.portLabel)"
+      @confirm="confirmOverwrite"
+      @cancel="cancelOverwrite"
+    />
+
     <div v-if="selectedCell && !showLinkSearch" class="modal-overlay" @click="closePopup">
       <div class="modal-content" @click.stop>
-        <h2>Patch Point #{{ selectedCell.id }}</h2>
-        <p><strong>Name:</strong> {{ selectedCell.name }}</p>
-        <p><strong>Description:</strong> {{ selectedCell.description }}</p>
-        
+        <h2>{{ t.patchbay.patchPointTitle(selectedCell.id) }}</h2>
+        <p><strong>{{ t.patchbay.nameLabel }}:</strong> {{ selectedCell.name }}</p>
+        <p><strong>{{ t.patchbay.typeLabel }}:</strong> {{ selectedCell.type }}</p>
+        <p><strong>{{ t.patchbay.descriptionLabel }}:</strong> {{ selectedCell.description }}</p>
+
         <div class="connection-status">
-          <h3>Connection</h3>
+          <h3>{{ t.patchbay.connectionLabel }}</h3>
           <div v-if="getConnection(selectedCell.id)" class="connected-info">
-            <p>Connected to: <strong>{{ getConnection(selectedCell.id)?.device.name }}</strong></p>
-            <p>Port: <strong>{{ getConnection(selectedCell.id)?.port.label }}</strong></p>
-            <button class="unlink-btn" @click="handleUnlink">Unlink</button>
+            <p>
+              {{ t.patchbay.connectedTo }}:
+              <strong>{{ getConnection(selectedCell.id)?.device.name }}</strong>
+            </p>
+            <p>
+              {{ t.patchbay.portLabel }}:
+              <strong>{{ getConnection(selectedCell.id)?.port.label }}</strong>
+            </p>
+            <button class="unlink-btn" @click="handleUnlink">{{ t.patchbay.unlink }}</button>
           </div>
           <div v-else class="disconnected-info">
-            <p>Not connected</p>
-            <button class="link-btn" @click="openLinkSearch">Link Device</button>
+            <p>{{ t.patchbay.notConnected }}</p>
+            <button class="link-btn" @click="openLinkSearch">{{ t.patchbay.linkDeviceAction }}</button>
           </div>
         </div>
 
-        <button class="close-btn-main" @click="closePopup">Close</button>
+        <button class="close-btn-main" @click="closePopup">{{ t.patchbay.close }}</button>
       </div>
     </div>
 
-    <!-- Link Search Modal -->
     <div v-if="showLinkSearch" class="modal-overlay" @click="closePopup">
       <div class="modal-content search-modal" @click.stop>
         <div class="modal-header">
-          <h2>Link Device to Point #{{ selectedCell?.id }}</h2>
-          <button class="close-btn" @click="closePopup">×</button>
+          <h2>{{ t.patchbay.linkDeviceTitle(selectedCell?.id || 0) }}</h2>
+          <button class="close-btn" @click="closePopup">{{ t.app.closeSymbol }}</button>
         </div>
-        
-        <input 
-          v-model="searchQuery" 
-          placeholder="Search devices..." 
+
+        <input
+          v-model="searchQuery"
+          :placeholder="t.patchbay.searchDevicesPlaceholder"
           class="search-input"
           autofocus
         />
@@ -174,17 +268,17 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
           <div v-for="device in filteredDevices" :key="device.id" class="search-device-item">
             <div class="device-name">{{ device.name }}</div>
             <div class="device-ports">
-              <button 
-                v-for="port in device.ports" 
+              <button
+                v-for="port in device.ports"
                 :key="port.id"
                 class="port-select-btn"
-                :class="{ 'active': port.patchbayId === selectedCell?.id, 'occupied': port.patchbayId && port.patchbayId !== selectedCell?.id }"
+                :class="{ active: port.patchbayId === selectedCell?.id, occupied: port.patchbayId && port.patchbayId !== selectedCell?.id }"
                 :disabled="!!(port.patchbayId && port.patchbayId !== selectedCell?.id)"
                 @click="selectDeviceForLink(device, port)"
               >
                 {{ port.label }}
                 <span v-if="port.patchbayId && port.patchbayId !== selectedCell?.id" class="occupied-tag">
-                  (#{{ port.patchbayId }})
+                  {{ t.patchbay.occupiedTag(port.patchbayId) }}
                 </span>
               </button>
             </div>
@@ -199,142 +293,231 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
 .main-container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 40px;
-  background-color: #333;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background-color: var(--surface-1);
   width: 100%;
   height: 100%;
-  box-sizing: border-box;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-1);
   overflow: auto;
 }
 
 .selection-mode {
-  border: 4px solid #48bb78;
+  border: 2px solid rgba(61, 122, 88, 0.9);
+  box-shadow: 0 0 0 2px rgba(61, 122, 88, 0.2);
 }
 
 .selection-banner {
-  background-color: #48bb78;
-  color: white;
-  padding: 10px;
+  background-color: rgba(61, 122, 88, 0.2);
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
   text-align: center;
-  font-weight: bold;
+  font-weight: 600;
   display: flex;
   justify-content: center;
-  gap: 20px;
+  gap: var(--space-3);
   align-items: center;
-  margin-bottom: 10px;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(61, 122, 88, 0.4);
 }
 
 .selection-banner button {
-  background: white;
-  color: #48bb78;
-  border: none;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
 }
 
 .highlight-banner {
-  background: linear-gradient(135deg, #d53f8c, #ed64a6);
-  color: white;
-  padding: 10px 20px;
+  background: linear-gradient(120deg, rgba(61, 122, 88, 0.3), rgba(212, 154, 79, 0.25));
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
   text-align: center;
   font-weight: 500;
   display: flex;
   justify-content: center;
-  gap: 15px;
+  gap: var(--space-3);
   align-items: center;
-  margin-bottom: 10px;
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(213, 63, 140, 0.4);
-}
-
-.highlight-banner strong {
-  font-size: 1.1rem;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(212, 154, 79, 0.3);
 }
 
 .highlight-banner button {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  transition: background 0.2s;
-}
-
-.highlight-banner button:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 
 .grid-controls {
   display: flex;
-  justify-content: center;
-  margin-bottom: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
 }
 
 .grid-search-input {
   width: 100%;
-  max-width: 400px;
-  padding: 8px 12px;
-  background-color: #2d3748;
-  border: 1px solid #4a5568;
-  color: white;
-  border-radius: 4px;
+  max-width: 360px;
+  padding: 10px 12px;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-radius: var(--radius-2);
+}
+
+.grid-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.legend-title {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.legend-chip {
+  padding: 4px 10px;
+  border-radius: var(--radius-round);
+  font-size: 0.8rem;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.legend-chip.linked {
+  border-color: rgba(106, 163, 111, 0.6);
+}
+
+.legend-chip.open {
+  border-color: rgba(141, 135, 122, 0.6);
+}
+
+.legend-chip.match {
+  border-color: rgba(212, 154, 79, 0.6);
+}
+
+.legend-chip.highlight {
+  border-color: rgba(61, 122, 88, 0.7);
 }
 
 .grid-wrapper {
   display: flex;
   flex-direction: column;
-  gap: 30px;
+  gap: var(--space-4);
   width: 100%;
 }
 
 .grid-section {
   display: grid;
-  grid-template-columns: repeat(48, 1fr);
-  grid-template-rows: repeat(2, 1fr);
+  grid-template-columns: 32px repeat(48, minmax(22px, 1fr));
+  grid-template-rows: auto repeat(2, minmax(28px, 1fr));
   gap: 4px;
   width: 100%;
-  /* Ensure it doesn't shrink too much */
-  min-width: 1200px; 
+  min-width: 1280px;
+  position: relative;
+}
+
+.grid-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  background: var(--surface-1);
+  z-index: 2;
+}
+
+.grid-col-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-align: center;
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  padding-bottom: 4px;
+  z-index: 2;
+}
+
+.grid-row-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  left: 0;
+  background: var(--surface-1);
+  z-index: 1;
 }
 
 .grid-cell {
-  background-color: #4a5568;
-  border: 1px solid #2d3748;
-  border-radius: 2px;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-1);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.2s;
-  height: 40px; /* Fixed height for better aspect ratio */
+  transition: background-color 0.2s, border-color 0.2s, transform 0.2s;
+  height: 34px;
+  position: relative;
 }
 
-.grid-cell:hover {
-  background-color: #63b3ed;
+.grid-cell.open {
+  background-color: var(--surface-2);
 }
 
 .grid-cell.linked {
-  background-color: #2b6cb0; /* Darker blue for connected cells */
-  border-color: #4299e1;
+  background-color: rgba(61, 122, 88, 0.25);
+  border-color: rgba(61, 122, 88, 0.6);
+}
+
+.grid-cell:hover {
+  border-color: rgba(212, 154, 79, 0.6);
+  transform: translateY(-1px);
+}
+
+.grid-cell[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  transform: translateX(-50%);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
+  white-space: nowrap;
+  font-size: 0.75rem;
+  z-index: 20;
+  box-shadow: var(--shadow-1);
 }
 
 .grid-cell.highlight-match {
-  background-color: #ed8936 !important; /* Orange highlight */
-  border-color: #fbd38d !important;
-  box-shadow: 0 0 5px #ed8936;
+  background-color: rgba(212, 154, 79, 0.35);
+  border-color: rgba(212, 154, 79, 0.7);
+  box-shadow: 0 0 6px rgba(212, 154, 79, 0.3);
   z-index: 1;
 }
 
 .grid-cell.highlight-connection {
-  background-color: #d53f8c !important; /* Magenta/Pink highlight for connection finder */
-  border-color: #fbb6ce !important;
-  box-shadow: 0 0 15px #d53f8c, 0 0 30px #d53f8c, 0 0 45px #ed64a6;
+  background-color: rgba(61, 122, 88, 0.6);
+  border-color: rgba(61, 122, 88, 0.9);
+  box-shadow: 0 0 18px rgba(61, 122, 88, 0.5);
   z-index: 10;
-  animation: connection-pulse 0.8s ease-in-out infinite;
-  transform: scale(1.3);
+  animation: connection-pulse 1s ease-in-out infinite;
+  transform: scale(1.08);
   border-width: 2px;
 }
 
@@ -345,32 +528,29 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
 
 @keyframes connection-pulse {
   0%, 100% {
-    box-shadow: 0 0 15px #d53f8c, 0 0 30px #d53f8c, 0 0 45px #ed64a6;
-    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(61, 122, 88, 0.5);
   }
   50% {
-    box-shadow: 0 0 20px #ed64a6, 0 0 40px #ed64a6, 0 0 60px #f687b3;
-    transform: scale(1.4);
+    box-shadow: 0 0 18px rgba(106, 163, 111, 0.7);
   }
 }
 
 .cell-text {
   font-size: 0.6rem;
-  color: white;
+  color: var(--text-primary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   padding: 1px;
 }
 
-/* Modal Styles */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(7, 6, 5, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -378,16 +558,17 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
 }
 
 .modal-content {
-  background-color: #2d3748;
-  padding: 2rem;
-  border-radius: 8px;
+  background-color: var(--surface-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-3);
   min-width: 300px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  color: #e2e8f0;
+  box-shadow: var(--shadow-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
 }
 
 .modal-content.search-modal {
-  width: 600px;
+  width: 640px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -395,8 +576,8 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
 }
 
 .modal-header {
-  padding: 20px;
-  border-bottom: 1px solid #4a5568;
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-default);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -405,167 +586,122 @@ const selectDeviceForLink = async (device: Device, port: DevicePort) => {
 .close-btn {
   background: none;
   border: none;
-  color: #a0aec0;
+  color: var(--text-secondary);
   font-size: 1.5rem;
   cursor: pointer;
 }
 
 .connection-status {
-  margin: 20px 0;
-  padding: 15px;
-  background-color: #1a202c;
-  border-radius: 4px;
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  background-color: var(--surface-1);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
 }
 
 .link-btn {
-  background-color: #4299e1;
-  color: white;
+  background-color: var(--accent);
+  color: #0c0e0b;
   border: none;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  margin-top: 10px;
+  margin-top: var(--space-2);
+  font-weight: 600;
 }
 
 .unlink-btn {
-  background-color: #e53e3e;
-  color: white;
+  background-color: var(--danger);
+  color: #fdf7ee;
   border: none;
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  margin-top: 10px;
+  margin-top: var(--space-2);
 }
 
 .close-btn-main {
-  margin-top: 1rem;
+  margin-top: var(--space-3);
   padding: 0.5rem 1rem;
-  background-color: #718096;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  background-color: var(--surface-3);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-2);
   cursor: pointer;
 }
 
-/* Search Modal Styles */
 .search-input {
-  margin: 20px;
+  margin: var(--space-4);
   padding: 10px;
-  background-color: #1a202c;
-  border: 1px solid #4a5568;
-  color: white;
-  border-radius: 4px;
+  background-color: var(--surface-1);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-radius: var(--radius-2);
 }
 
 .device-search-list {
   overflow-y: auto;
-  padding: 0 20px 20px 20px;
+  padding: 0 var(--space-4) var(--space-4) var(--space-4);
 }
 
 .search-device-item {
-  margin-bottom: 15px;
-  background-color: #1a202c;
-  padding: 10px;
-  border-radius: 4px;
+  margin-bottom: var(--space-3);
+  background-color: var(--surface-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
 }
 
 .device-name {
   font-weight: bold;
-  margin-bottom: 8px;
-  color: #90cdf4;
+  margin-bottom: var(--space-2);
+  color: var(--text-primary);
 }
 
 .device-ports {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .port-select-btn {
-  background-color: #2d3748;
-  border: 1px solid #4a5568;
-  color: #e2e8f0;
+  background-color: var(--surface-2);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-2);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .port-select-btn:hover:not(:disabled) {
-  background-color: #4299e1;
-  color: white;
+  background-color: rgba(61, 122, 88, 0.25);
 }
 
 .port-select-btn.active {
-  background-color: #48bb78;
-  color: white;
-  border-color: #48bb78;
+  background-color: var(--accent);
+  color: #0c0e0b;
+  border-color: var(--accent);
 }
 
 .port-select-btn.occupied {
   opacity: 0.5;
   cursor: not-allowed;
-  background-color: #2d3748;
+  background-color: var(--surface-2);
 }
 
 .occupied-tag {
   font-size: 0.7rem;
-  color: #a0aec0;
+  color: var(--text-muted);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 960px) {
   .main-container {
-    padding: 10px 2px;
-    gap: 8px;
-    justify-content: flex-start;
-    flex-direction: column; /* Keep column to stack search bar on top */
-    overflow-y: auto;
-    height: 100vh;
-    align-items: stretch;
-  }
-
-  .top-controls {
-    width: 100%;
-    padding: 0 5px;
-    box-sizing: border-box;
-  }
-
-  .grid-wrapper {
-    display: flex;
-    flex-direction: row;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    flex: 1; /* Take remaining height */
+    padding: var(--space-3);
   }
 
   .grid-section {
-    min-width: 0;
-    flex: 1; /* Fit to screen */
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(48, auto);
-    grid-auto-flow: column;
-    gap: 1px;
-    direction: rtl;
-  }
-  
-  /* Reorder sections for mobile to match drawing: [Sec 3] [Sec 2] [Sec 1] */
-  .section-1 { order: 3; }
-  .section-2 { order: 2; }
-  .section-3 { order: 1; }
-  
-  .grid-cell {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1; /* Keep square */
-    font-size: 0.6rem;
-    direction: ltr;
+    min-width: 960px;
   }
 }
-
-
-
-
-
 </style>
