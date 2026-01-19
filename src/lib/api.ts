@@ -1,4 +1,4 @@
-// API client for Pepper backend
+// API client for patchbay backend
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8088'
 
 // API Types (snake_case from backend)
@@ -21,6 +21,8 @@ export interface ApiDevice {
   name: string
   type: string
   ports: ApiPort[]
+  image_url?: string | null
+  image_updated_at?: string | null
 }
 
 export interface ApiState {
@@ -140,5 +142,39 @@ export const api = {
       method: 'POST',
       body: formData,
     })
+  },
+
+  async uploadDeviceImage(deviceId: number, image: File): Promise<ApiDevice> {
+    // Client-side validation
+    if (!image.type.startsWith('image/')) {
+      throw new Error('Invalid file type. Please upload an image file.')
+    }
+    const MAX_SIZE = 12 * 1024 * 1024 // 12MB
+    if (image.size > MAX_SIZE) {
+      throw new Error('Image too large. Maximum size is 12MB.')
+    }
+
+    const formData = new FormData()
+    formData.append('image', image)
+
+    return request<ApiDevice>(`/devices/${deviceId}/image`, {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  buildAbsoluteUrl(relativeOrAbsolute: string): string {
+    if (relativeOrAbsolute.startsWith('http://') || relativeOrAbsolute.startsWith('https://')) {
+      return relativeOrAbsolute
+    }
+    return `${API_URL}${relativeOrAbsolute}`
+  },
+
+  getDeviceImageSrc(imageUrl: string | null | undefined, imageUpdatedAt: string | null | undefined): string | null {
+    if (!imageUrl) return null
+    
+    const base = this.buildAbsoluteUrl(imageUrl)
+    const cacheBust = imageUpdatedAt ? `?v=${encodeURIComponent(imageUpdatedAt)}` : ''
+    return base + cacheBust
   },
 }

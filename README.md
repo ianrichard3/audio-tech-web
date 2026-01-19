@@ -67,8 +67,12 @@ Sistema web para gestionar y visualizar conexiones de patchbay en estudios de au
    ```
 
 2. **Configurar variables de entorno**
-   
-   El archivo `.env` ya debe tener:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Editar `.env` si necesitas otro host:
    ```env
    VITE_API_URL=http://localhost:8088
    ```

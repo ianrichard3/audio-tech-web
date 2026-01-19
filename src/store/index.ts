@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { api, type ApiPort, type ApiDevice, type ApiPatchbayPoint } from '@/lib/api'
+import { strings } from '@/ui/strings'
 
 // Types
 export interface PatchBayNode {
@@ -21,6 +22,26 @@ export interface Device {
   name: string;
   type: string;
   ports: DevicePort[];
+  imageUrl?: string | null;
+  imageUpdatedAt?: string | null;
+}
+
+interface PendingLink {
+  portId: string;
+  deviceId: number;
+  deviceName: string;
+  portLabel: string;
+}
+
+interface LinkFlow {
+  returnTab: 'devices' | 'connections' | 'patchbay';
+  returnPayload?: Record<string, unknown>;
+}
+
+export interface Toast {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
 }
 
 // Convert API types (snake_case) to frontend types (camelCase)
@@ -39,6 +60,8 @@ function apiDeviceToDevice(apiDevice: ApiDevice): Device {
     name: apiDevice.name,
     type: apiDevice.type,
     ports: apiDevice.ports.map(apiPortToDevicePort),
+    imageUrl: apiDevice.image_url,
+    imageUpdatedAt: apiDevice.image_updated_at,
   }
 }
 
@@ -54,12 +77,21 @@ function apiPatchbayToNode(apiPoint: ApiPatchbayPoint): PatchBayNode {
 export const store = reactive({
   patchbayNodes: [] as PatchBayNode[],
   devices: [] as Device[],
+  selectedDevice: null as Device | null,
   loading: false,
   error: null as string | null,
   activeTab: 'devices', // 'patchbay' | 'devices' | 'connections'
   selectionMode: false,
-  pendingLinkPortId: null as string | null, // The port waiting to be linked (from Device -> Patchbay flow)
+  pendingLink: null as PendingLink | null, // The port waiting to be linked (from Device -> Patchbay flow)
+  linkFlow: null as LinkFlow | null,
+  lastLinkReturnPayload: null as LinkFlow['returnPayload'] | null,
   highlightedPatchIds: [] as number[], // For connection finder highlighting
+  patchbayFocusId: null as number | null,
+  connectionFinderState: {
+    a: null as null | { deviceId: number; portId: string },
+    b: null as null | { deviceId: number; portId: string },
+  },
+  toasts: [] as Toast[],
   
   // Load data from API
   async loadData() {
@@ -71,7 +103,8 @@ export const store = reactive({
       this.patchbayNodes = state.patchbay_points.map(apiPatchbayToNode)
       this.devices = state.devices.map(apiDeviceToDevice)
     } catch (err: any) {
-      this.error = err.message
+      this.error = err.message || strings.toast.loadFailed
+      this.pushToast({ type: 'error', message: this.error })
       console.error('Error loading data:', err)
     } finally {
       this.loading = false
@@ -84,17 +117,21 @@ export const store = reactive({
   },
   
   // Flow: Device -> Patchbay (Select a slot for a specific port)
-  startLinkingPort(portId: string) {
-    this.pendingLinkPortId = portId
+  startLinkingPort(payload: PendingLink, options?: Partial<LinkFlow>) {
+    this.pendingLink = payload
     this.selectionMode = true
     this.activeTab = 'patchbay'
+    this.linkFlow = {
+      returnTab: options?.returnTab ?? 'devices',
+      returnPayload: options?.returnPayload,
+    }
   },
   
   async completeLink(patchbayId: number) {
-    if (!this.pendingLinkPortId) return
+    if (!this.pendingLink) return
 
     try {
-      const response = await api.linkPort(this.pendingLinkPortId, patchbayId)
+      const response = await api.linkPort(this.pendingLink.portId, patchbayId)
       
       // Update local state: unlink old port if any
       if (response.unlinked_port_id) {
@@ -109,25 +146,35 @@ export const store = reactive({
 
       // Update linked port
       for (const device of this.devices) {
-        const port = device.ports.find(p => p.id === this.pendingLinkPortId)
+        const port = device.ports.find(p => p.id === this.pendingLink?.portId)
         if (port) {
           port.patchbayId = response.patchbay_id
           break
         }
       }
+      this.pushToast({
+        type: 'success',
+        message: strings.toast.linkedSuccess(
+          this.pendingLink.deviceName,
+          this.pendingLink.portLabel,
+          response.patchbay_id
+        ),
+      })
     } catch (err: any) {
       console.error('Error linking port:', err)
-      this.error = err.message
+      this.pushToast({ type: 'error', message: err.message || strings.toast.linkFailed })
       return
     }
     
+    this.activeTab = this.linkFlow?.returnTab ?? 'devices'
+    this.lastLinkReturnPayload = this.linkFlow?.returnPayload ?? null
     this.cancelLinking()
-    this.activeTab = 'devices'
   },
   
   cancelLinking() {
-    this.pendingLinkPortId = null
+    this.pendingLink = null
     this.selectionMode = false
+    this.linkFlow = null
   },
   
   // Flow: Patchbay -> Device (Unlink or Link via Search)
@@ -142,7 +189,7 @@ export const store = reactive({
       }
     } catch (err: any) {
       console.error('Error unlinking port:', err)
-      this.error = err.message
+      this.pushToast({ type: 'error', message: err.message || strings.toast.unlinkFailed })
     }
   },
 
@@ -170,13 +217,15 @@ export const store = reactive({
           port.patchbayId = response.patchbay_id
         }
       }
+      return true
     } catch (err: any) {
       console.error('Error linking patchbay to device:', err)
-      this.error = err.message
+      this.pushToast({ type: 'error', message: err.message || strings.toast.linkFailed })
+      return false
     }
   },
   
-  async addDevice(device: Omit<Device, 'id'>) {
+  async addDevice(device: Omit<Device, 'id'>): Promise<Device> {
     try {
       const apiDevice = await api.createDevice({
         name: device.name,
@@ -188,15 +237,16 @@ export const store = reactive({
         })),
       })
       
-      this.devices.push(apiDeviceToDevice(apiDevice))
+      const newDevice = apiDeviceToDevice(apiDevice)
+      this.devices.push(newDevice)
+      return newDevice
     } catch (err: any) {
       console.error('Error adding device:', err)
-      this.error = err.message
       throw err
     }
   },
 
-  async updateDevice(id: number, payload: { name: string; type: string; ports: DevicePort[] }) {
+  async updateDevice(id: number, payload: { name: string; type: string; ports: DevicePort[] }): Promise<Device> {
     try {
       const apiDevice = await api.updateDevice(id, {
         name: payload.name,
@@ -209,13 +259,14 @@ export const store = reactive({
         })),
       })
 
+      const updatedDevice = apiDeviceToDevice(apiDevice)
       const index = this.devices.findIndex(d => d.id === id)
       if (index !== -1) {
-        this.devices[index] = apiDeviceToDevice(apiDevice)
+        this.devices[index] = updatedDevice
       }
+      return updatedDevice
     } catch (err: any) {
       console.error('Error updating device:', err)
-      this.error = err.message
       throw err
     }
   },
@@ -226,11 +277,68 @@ export const store = reactive({
       
       const index = this.devices.findIndex(d => d.id === id)
       if (index !== -1) this.devices.splice(index, 1)
+      
+      // Clear selection if deleted device was selected
+      if (this.selectedDevice?.id === id) {
+        this.selectedDevice = null
+      }
     } catch (err: any) {
       console.error('Error deleting device:', err)
-      this.error = err.message
       throw err
     }
+  },
+
+  async uploadDeviceImage(deviceId: number, image: File): Promise<Device> {
+    try {
+      const apiDevice = await api.uploadDeviceImage(deviceId, image)
+      const updatedDevice = apiDeviceToDevice(apiDevice)
+      
+      // Replace device in store
+      const index = this.devices.findIndex(d => d.id === deviceId)
+      if (index !== -1) {
+        this.devices[index] = updatedDevice
+      }
+      
+      // Update selectedDevice reference if it's the same device
+      if (this.selectedDevice?.id === deviceId) {
+        this.selectedDevice = updatedDevice
+      }
+      
+      return updatedDevice
+    } catch (err: any) {
+      console.error('Error uploading device image:', err)
+      throw err
+    }
+  },
+
+  setConnectionFinderSelection(side: 'a' | 'b', deviceId: number, portId: string) {
+    this.connectionFinderState[side] = { deviceId, portId }
+  },
+
+  clearConnectionFinderSelection(side: 'a' | 'b') {
+    this.connectionFinderState[side] = null
+  },
+
+  swapConnectionFinderSelections() {
+    const temp = this.connectionFinderState.a
+    this.connectionFinderState.a = this.connectionFinderState.b
+    this.connectionFinderState.b = temp
+  },
+
+  clearLinkReturnPayload() {
+    this.lastLinkReturnPayload = null
+  },
+
+  pushToast(payload: Omit<Toast, 'id'>) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+    const toast: Toast = { id, ...payload }
+    this.toasts.push(toast)
+    window.setTimeout(() => this.dismissToast(id), 4200)
+  },
+
+  dismissToast(id: string) {
+    const index = this.toasts.findIndex(toast => toast.id === id)
+    if (index !== -1) this.toasts.splice(index, 1)
   },
   
   // Helpers
