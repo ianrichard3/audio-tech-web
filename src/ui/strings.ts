@@ -40,6 +40,8 @@ export const strings = {
     deviceSaveFailed: 'Failed to save device.',
     deviceDeleteFailed: 'Failed to delete device.',
     imageParseFailed: 'Image parsing failed. Try a clearer, well-lit photo.',
+    sessionExpired: 'Sesión expirada. Por favor, volvé a iniciar sesión.',
+    noPermission: 'No tenés permisos para acceder a estos datos.',
   },
   patchbay: {
     linkingBanner: (deviceName: string, portLabel: string) =>

@@ -80,6 +80,8 @@ export const store = reactive({
   selectedDevice: null as Device | null,
   loading: false,
   error: null as string | null,
+  hasLoadedInitialData: false, // Flag to prevent multiple loads
+  authError: false, // Flag to prevent retry loops on auth errors
   activeTab: 'devices', // 'patchbay' | 'devices' | 'connections'
   selectionMode: false,
   pendingLink: null as PendingLink | null, // The port waiting to be linked (from Device -> Patchbay flow)
@@ -95,6 +97,17 @@ export const store = reactive({
   
   // Load data from API
   async loadData() {
+    // Prevenir múltiples cargas simultáneas o reintentos después de errores de auth
+    if (this.loading) {
+      console.log('[Store] Already loading, skipping duplicate loadData call')
+      return
+    }
+    
+    if (this.authError) {
+      console.log('[Store] Auth error detected, skipping loadData - user needs to re-authenticate')
+      return
+    }
+
     this.loading = true
     this.error = null
     
@@ -102,13 +115,56 @@ export const store = reactive({
       const state = await api.getState()
       this.patchbayNodes = state.patchbay_points.map(apiPatchbayToNode)
       this.devices = state.devices.map(apiDeviceToDevice)
+      this.hasLoadedInitialData = true
+      this.authError = false // Clear auth error on success
+      console.log('[Store] Data loaded successfully:', {
+        patchbayNodes: this.patchbayNodes.length,
+        devices: this.devices.length
+      })
     } catch (err: any) {
-      this.error = err.message || strings.toast.loadFailed
-      this.pushToast({ type: 'error', message: this.error || strings.toast.loadFailed })
-      console.error('Error loading data:', err)
+      // Handle auth-specific errors
+      if (err.message === 'AUTH_EXPIRED') {
+        this.error = strings.toast.sessionExpired || 'Sesión expirada. Por favor, volvé a iniciar sesión.'
+        this.authError = true // Prevent retry loop
+        this.pushToast({ type: 'error', message: this.error })
+        console.error('[Store] Auth expired - user will be signed out')
+      } else if (err.message === 'AUTH_FORBIDDEN') {
+        // Este error significa que falta org activa - la UI debe manejarlo
+        this.error = 'Active organization required'
+        this.authError = true // Prevent retry loop
+        console.warn('[Store] Organization required - user needs to select/create org')
+        // NO mostrar toast aquí - la UI ya mostrará la pantalla de org
+      } else {
+        this.error = err.message || strings.toast.loadFailed
+        this.pushToast({ type: 'error', message: this.error || strings.toast.loadFailed })
+      }
+      console.error('[Store] Error loading data:', err)
     } finally {
       this.loading = false
     }
+  },
+  
+  // Reset state (llamar cuando el usuario se desloguea o cambia de org)
+  resetState() {
+    this.patchbayNodes = []
+    this.devices = []
+    this.selectedDevice = null
+    this.loading = false
+    this.error = null
+    this.hasLoadedInitialData = false
+    this.authError = false
+    this.activeTab = 'devices'
+    this.selectionMode = false
+    this.pendingLink = null
+    this.linkFlow = null
+    this.lastLinkReturnPayload = null
+    this.highlightedPatchIds = []
+    this.patchbayFocusId = null
+    this.connectionFinderState = {
+      a: null,
+      b: null,
+    }
+    console.log('[Store] State reset')
   },
   
   // Actions

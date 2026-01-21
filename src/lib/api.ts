@@ -1,4 +1,6 @@
 // API client for patchbay backend
+import { getAuthToken } from './authToken'
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8088'
 
 // API Types (snake_case from backend)
@@ -60,11 +62,17 @@ export interface ApiDeviceUpdate {
 }
 
 // HTTP client
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, isRetry = false): Promise<T> {
   const url = `${API_URL}${path}`
   const body = options?.body
-  const headers: HeadersInit = {
-    ...options?.headers,
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string>),
+  }
+  
+  // Inject Authorization token if available
+  const token = await getAuthToken({ skipCache: isRetry })
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
   }
   
   try {
@@ -77,7 +85,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     })
 
     if (!response.ok) {
+      // Handle 401: retry once with fresh token
+      if (response.status === 401 && !isRetry && token) {
+        console.warn('[API] Got 401, retrying with fresh token...')
+        return request<T>(path, options, true)
+      }
+      
       const errorText = await response.text()
+      
+      // Throw specific error for auth issues
+      if (response.status === 401) {
+        throw new Error('AUTH_EXPIRED')
+      }
+      if (response.status === 403) {
+        throw new Error('AUTH_FORBIDDEN')
+      }
+      
       throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
 

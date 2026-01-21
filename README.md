@@ -4,192 +4,304 @@ Sistema web para gestionar y visualizar conexiones de patchbay en estudios de au
 
 ## ✨ Características
 
-- **Visualización de Patchbay**: Grilla interactiva de 96 puntos (4 filas x 24 columnas)
+- **Autenticación Multi-Workspace**: Login con Google/GitHub via Clerk, múltiples organizaciones
+- **Visualización de Patchbay**: Grilla interactiva de 64 puntos con estado en tiempo real
 - **Gestión de Dispositivos**: CRUD completo para equipos de audio (preamps, compresores, EQs, etc.)
 - **Administración de Puertos**: Cada dispositivo puede tener múltiples puertos (Input/Output/Other)
 - **Vinculación Dinámica**: Conecta puertos de dispositivos a puntos del patchbay
-- **Búsqueda y Filtrado**: Encuentra rápidamente dispositivos y conexiones
-- **Persistencia con API**: Datos guardados en PostgreSQL mediante FastAPI backend
+- **Upload de Imágenes**: Sube fotos de tus devices para referencia visual
+- **AI-Powered**: Parseo automático de devices desde imágenes (próximamente)
+- **Persistencia con API**: Datos guardados en PostgreSQL mediante backend seguro
 
 ## 🛠️ Tech Stack
 
 ### Frontend
-- **Frontend**: Vue 3 + TypeScript
+- **Framework**: Vue 3 + TypeScript
 - **Build Tool**: Vite
+- **Auth**: Clerk (OAuth, Organizations)
 - **State Management**: Store reactivo con Vue Composition API
 - **Estilos**: CSS vanilla con diseño oscuro profesional
 
 ### Backend
-- **API**: FastAPI
+- **Framework**: Rust + Axum (ver repo del backend)
 - **Database**: PostgreSQL 16
-- **ORM**: SQLAlchemy 2.0
-- **Migrations**: Alembic
+- **Auth**: JWT validation con Clerk JWKS
+- **Storage**: S3-compatible para imágenes
 
 ## 📋 Requisitos Previos
 
-- Node.js 18+
-- Docker & Docker Compose
+- Node.js 20+
 - npm o yarn
+- Cuenta en [Clerk](https://clerk.com) (gratis para dev)
+- Backend corriendo (ver repo `pepper-backend`)
 
-## 🚀 Instalación
+## 🚀 Instalación Rápida
 
-### Backend (API + Database)
+### 1. Configurar Clerk
 
-1. **Ir a la carpeta del backend**
-   ```bash
-   cd api-backend
-   ```
+Antes que nada, necesitás configurar Clerk. **Ver [docs/CLERK_SETUP.md](./docs/CLERK_SETUP.md)** para la guía completa.
 
-2. **Copiar variables de entorno**
-   ```bash
-   cp .env.example .env
-   ```
+Resumen:
+1. Crear cuenta en [Clerk Dashboard](https://dashboard.clerk.com)
+2. Activar **Organizations** (requerido por el backend)
+3. Configurar Social Connections (Google recomendado)
+4. Copiar **Publishable Key** (`pk_test_...`)
 
-3. **Levantar servicios con Docker**
-   ```bash
-   docker compose up --build
-   ```
+### 2. Instalar Dependencias
 
-   Esto levanta:
-   - PostgreSQL en puerto `5435`
-   - API FastAPI en puerto `8088`
-   - pgAdmin en puerto `8090`
+```bash
+npm install
+```
 
-4. **Verificar API**
-   - Swagger: http://localhost:8088/docs
-   - Health: http://localhost:8088/health
+### 3. Configurar Variables de Entorno
 
-### Frontend (Vue App)
+```bash
+cp .env.example .env
+```
 
-1. **Instalar dependencias**
-   ```bash
-   npm install
-   ```
+Editar `.env`:
 
-2. **Configurar variables de entorno**
+```env
+# Backend API URL
+VITE_API_URL=http://localhost:8088
 
-   ```bash
-   cp .env.example .env
-   ```
+# Clerk Publishable Key (REQUERIDO)
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_tu_key_aqui
+```
 
-   Editar `.env` si necesitas otro host:
-   ```env
-   VITE_API_URL=http://localhost:8088
-   ```
+### 4. Iniciar Desarrollo
 
-3. **Iniciar servidor de desarrollo**
-   ```bash
-   npm run dev
-   ```
+```bash
+npm run dev
+```
 
-   La app estará disponible en http://localhost:5173
+La app estará disponible en **http://localhost:5173**
+
+### 5. Primer Login
+
+1. Abrir http://localhost:5173
+2. Click en "Sign In"
+3. Autenticarse con Google (u otro provider)
+4. **Crear una organización** (workspace)
+   - Sin org activa, el backend responde `403`
+   - La org se crea desde el selector en la UI
+5. ¡Listo! Los datos se cargan automáticamente
 
 ## 📁 Estructura del Proyecto
 
 ```
 pepper/
-├── src/                        # Frontend Vue
+├── src/
 │   ├── components/
-│   │   ├── PatchBayGrid.vue    # Grilla visual del patchbay
-│   │   ├── DevicesManager.vue  # Gestión de dispositivos
-│   │   └── ConnectionFinder.vue
-│   ├── store/
-│   │   └── index.ts            # Estado global + API calls
+│   │   ├── AuthScreen.vue          # Pantalla de login
+│   │   ├── PatchBayGrid.vue        # Grilla visual del patchbay
+│   │   ├── DevicesManager.vue      # Gestión de dispositivos
+│   │   └── ConnectionFinder.vue    # Búsqueda de conexiones
 │   ├── lib/
-│   │   └── api.ts              # Cliente HTTP para backend
-│   ├── data/
-│   │   └── patchbayData.json   # Datos estáticos del patchbay
-│   ├── App.vue
-│   └── main.ts
-└── api-backend/                # Backend FastAPI
-    ├── app/
-    │   ├── api/routes/         # Endpoints HTTP
-    │   ├── models/             # Modelos SQLAlchemy
-    │   ├── schemas/            # Schemas Pydantic
-    │   └── services/           # Lógica de negocio
-    ├── alembic/                # Migraciones DB
-    └── docker-compose.yml
+│   │   ├── api.ts                  # Cliente HTTP (Bearer token)
+│   │   └── authToken.ts            # Provider de tokens para API
+│   ├── store/
+│   │   └── index.ts                # Estado global + API calls
+│   ├── ui/
+│   │   ├── ToastHost.vue           # Notificaciones
+│   │   └── strings.ts              # Textos de la app
+│   ├── App.vue                     # Root component + auth orchestration
+│   └── main.ts                     # Bootstrap + Clerk init
+├── CLERK_SETUP.md                  # Guía de configuración de Clerk
+├── ARCHITECTURE.md                 # Arquitectura de auth
+├── TESTING_GUIDE.md                # Casos de prueba E2E
+├── DEPLOYMENT.md                   # Guía de deployment
+└── README.md                       # Este archivo
 ```
 
-## 🗄️ Modelo de Datos
+## 🔐 Autenticación y Seguridad
 
-La API maneja tres entidades principales:
+Esta app usa **Clerk** para autenticación con las siguientes características:
 
-### Devices
-Equipos de audio (preamps, synths, etc.)
-- `id`, `name`, `type`
+- ✅ **OAuth Social Login**: Google, GitHub, etc.
+- ✅ **Multi-Organization**: Múltiples workspaces por usuario
+- ✅ **JWT Validation**: El backend valida tokens contra JWKS de Clerk
+- ✅ **Org-scoped Data**: Cada org tiene su propio workspace aislado
+- ✅ **Auto Token Refresh**: Tokens se refrescan automáticamente (~1h)
 
-### Ports
-Puertos de entrada/salida de cada device
-- `id`, `device_id`, `label`, `type` (Input/Output/Other), `patchbay_id`
+### Flujo de Autenticación
 
-### Patchbay Points
-Puntos físicos del patchbay
-- `id`, `name`, `description`, `type`
+```
+1. Usuario abre app → Clerk carga
+2. No autenticado → Mostrar pantalla de login
+3. Login exitoso → Verificar si tiene org activa
+4. Sin org → Mostrar selector de org (crear/seleccionar)
+5. Con org → Cargar datos del workspace
+6. Todas las API calls incluyen: Authorization: Bearer <JWT>
+```
+
+**Importante**: El backend requiere que el JWT incluya el claim `org_id`. Sin organización activa, recibirás `403 Forbidden`.
+
+Ver [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) para detalles completos.
 
 ## 🎮 Uso
 
+## 🎮 Uso
+
+### Primera Vez: Crear tu Workspace
+
+1. Después del login, se te pedirá crear/seleccionar una **organización**
+2. Esta organización = tu workspace de patchbay
+3. Cada workspace tiene sus propios devices y conexiones (aislados)
+4. Podés tener múltiples workspaces y cambiar entre ellos
+
 ### Gestionar Dispositivos
+
 1. Ir a la pestaña **Devices**
 2. Click en **Add Device** para crear un nuevo equipo
 3. Agregar puertos con su tipo (Input/Output/Other)
-4. Guardar el dispositivo
+4. (Opcional) Subir una imagen del device
+5. Guardar el dispositivo
 
 ### Vincular a Patchbay
+
 1. Seleccionar un dispositivo
-2. En un puerto, click en **Link**
+2. En un puerto, click en **Link to Patchbay**
 3. Se abrirá el patchbay - seleccionar el punto deseado
-4. La conexión queda establecida
+4. La conexión queda establecida y se guarda automáticamente
 
 ### Ver Conexiones
+
 - En el **Patchbay**, los puntos conectados muestran el dispositivo vinculado
 - En **Devices**, cada puerto muestra su punto de patchbay asignado
+- Tab **Connections** muestra todas las conexiones activas
+
+### Cambiar de Workspace
+
+1. Click en el botón de usuario (arriba derecha)
+2. **Switch Organization**
+3. Seleccionar otro workspace o crear uno nuevo
+4. Los datos se recargan automáticamente
 
 ## 📜 Scripts Disponibles
 
-### Frontend
 ```bash
-npm run dev      # Servidor de desarrollo
-npm run build    # Build de producción
-npm run preview  # Preview del build
+npm run dev          # Servidor de desarrollo
+npm run build        # Build de producción
+npm run preview      # Preview del build local
+npm run verify-clerk # Verificar configuración de Clerk
+npm run type-check   # Verificar tipos de TypeScript
 ```
 
-### Backend
+## 🔧 API Endpoints (Backend)
+
+Todos los endpoints requieren `Authorization: Bearer <JWT>` (excepto `/health`).
+
+| Endpoint | Método | Auth | Org Required | Descripción |
+|----------|--------|------|--------------|-------------|
+| `/health` | GET | ❌ | ❌ | Health check |
+| `/state` | GET | ✅ | ✅ | Estado completo del workspace |
+| `/devices` | POST | ✅ | ✅ | Crear dispositivo |
+| `/devices/{id}` | PUT | ✅ | ✅ | Actualizar dispositivo |
+| `/devices/{id}` | DELETE | ✅ | ✅ | Borrar dispositivo |
+| `/devices/{id}/image` | POST | ✅ | ✅ | Upload imagen del device |
+| `/devices/parse-image` | POST | ✅ | ✅ | Parsear device con AI |
+| `/ports/{id}/link` | POST | ✅ | ✅ | Vincular puerto a patchbay |
+| `/ports/{id}/unlink` | POST | ✅ | ✅ | Desvincular puerto |
+
+**Nota**: El backend aprovisiona workspaces automáticamente al primer request de una nueva organización.
+
+## 🧪 Testing
+
+### Verificar Configuración
+
 ```bash
-docker compose up         # Levantar servicios
-docker compose down       # Detener servicios
-docker compose logs api   # Ver logs de la API
+npm run verify-clerk
 ```
 
-## 🐳 Docker
+Este script verifica:
+- Variables de entorno configuradas
+- Formato correcto de la Publishable Key
+- Conectividad con el backend
 
-Para correr todo el stack completo:
+### Tests E2E
+
+Ver [docs/TESTING_GUIDE.md](./docs/TESTING_GUIDE.md) para casos de prueba completos:
+
+- Login/logout
+- Organización requerida
+- Token refresh automático
+- Upload de imágenes
+- Cambio de workspace
+- Y más...
+
+## 🚀 Deployment
+
+Ver [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) para la guía completa de deployment a producción.
+
+### Quick Deploy (Vercel)
 
 ```bash
-# Backend
-cd api-backend && docker compose up -d
+# Install Vercel CLI
+npm i -g vercel
 
-# Frontend (en otra terminal)
-npm run dev
+# Deploy
+vercel
+
+# Configurar env vars en Vercel dashboard:
+# - VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
+# - VITE_API_URL=https://api.tu-dominio.com
 ```
 
-O para deployar el frontend también con Docker, usar el `docker-compose.yml` en la raíz.
+## 📚 Documentación Adicional
 
-## 🔧 API Endpoints
+- **[docs/CLERK_SETUP.md](./docs/CLERK_SETUP.md)**: Configuración completa de Clerk Dashboard
+- **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)**: Arquitectura de autenticación y flujos
+- **[docs/TESTING_GUIDE.md](./docs/TESTING_GUIDE.md)**: Casos de prueba E2E mínimos
+- **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**: Guía de deployment a producción
+- **[docs/](./docs/)**: Índice completo de documentación
 
-- `GET /state` - Estado completo (patchbay + devices)
-- `POST /devices` - Crear dispositivo con puertos
-- `DELETE /devices/{id}` - Borrar dispositivo
-- `POST /ports/{id}/link` - Vincular puerto a patchbay
-- `POST /ports/{id}/unlink` - Desvincular puerto
-- `PUT /ports/{id}/patchbay` - Actualizar patchbay de un puerto
+## 🐛 Troubleshooting
 
-Ver documentación completa en http://localhost:8088/docs
+### "Pantalla en blanco al abrir la app"
+
+**Causa**: `VITE_CLERK_PUBLISHABLE_KEY` no configurada.
+
+**Solución**:
+1. Verificar que `.env` existe
+2. Verificar que la key empieza con `pk_test_` o `pk_live_`
+3. Reiniciar el servidor: `Ctrl+C` → `npm run dev`
+
+### "Active organization required" (403)
+
+**Causa**: No tenés una organización activa.
+
+**Solución**:
+1. Click en el botón de usuario
+2. "Manage Organizations" → Crear o seleccionar una
+3. Refrescar la página
+
+### "Token validation failed" en el backend
+
+**Causa**: Backend no puede validar el JWT de Clerk.
+
+**Solución**:
+1. Verificar que el backend tiene `CLERK_ISSUER_URL` configurada
+2. Verificar que el backend puede acceder a internet (para JWKS)
+3. Verificar que usás la misma app de Clerk en frontend y backend
+
+### Más ayuda
+
+Ver la sección de **Troubleshooting** en:
+- [docs/CLERK_SETUP.md](./docs/CLERK_SETUP.md#troubleshooting)
+- [docs/TESTING_GUIDE.md](./docs/TESTING_GUIDE.md#problemas-comunes-y-soluciones)
+
+## 🤝 Contribuir
+
+1. Fork el proyecto
+2. Crear branch de feature (`git checkout -b feature/amazing-feature`)
+3. Commit cambios (`git commit -m 'Add amazing feature'`)
+4. Push al branch (`git push origin feature/amazing-feature`)
+5. Abrir Pull Request
 
 ## 📄 Licencia
 
 MIT
-
 
 ---
 
