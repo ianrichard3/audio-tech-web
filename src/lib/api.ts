@@ -1,5 +1,37 @@
 // API client for patchbay backend
+import { getAuthToken } from './authToken'
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8088'
+const REQUEST_TIMEOUT_MS = 20000
+
+function isOrgRequiredError(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('active organization required') ||
+    normalized.includes('organization required') ||
+    normalized.includes('org required')
+  )
+}
+
+async function readErrorBody(response: Response): Promise<{ text: string; json: any | null }> {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    try {
+      const json = await response.json()
+      const text = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json)
+      return { text, json }
+    } catch {
+      return { text: '', json: null }
+    }
+  }
+
+  try {
+    const text = await response.text()
+    return { text, json: null }
+  } catch {
+    return { text: '', json: null }
+  }
+}
 
 // API Types (snake_case from backend)
 export interface ApiPatchbayPoint {
@@ -60,29 +92,76 @@ export interface ApiDeviceUpdate {
 }
 
 // HTTP client
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, isRetry = false): Promise<T> {
   const url = `${API_URL}${path}`
   const body = options?.body
-  const headers: HeadersInit = {
-    ...options?.headers,
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string>),
+  }
+  
+  // Inject Authorization token if available
+  const token = await getAuthToken({ skipCache: isRetry })
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
   }
   
   try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...headers,
-      },
-    })
+    const controller = new AbortController()
+    if (options?.signal) {
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+          ...headers,
+        },
+      })
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
 
     if (!response.ok) {
-      const errorText = await response.text()
+      // Handle 401: retry once with fresh token
+      if (response.status === 401 && !isRetry && token) {
+        console.warn('[API] Got 401, retrying with fresh token...')
+        return request<T>(path, options, true)
+      }
+      
+      const { text: errorText, json: errorJson } = await readErrorBody(response)
+      
+      // Throw specific error for auth issues
+      if (response.status === 401) {
+        throw new Error('AUTH_EXPIRED')
+      }
+      if (response.status === 403) {
+        const detailText =
+          typeof errorJson?.detail === 'string' ? errorJson.detail : errorText || ''
+        if (isOrgRequiredError(detailText)) {
+          throw new Error('ORG_REQUIRED')
+        }
+        throw new Error('AUTH_FORBIDDEN')
+      }
+      if (response.status === 503) {
+        throw new Error('AUTH_SERVICE_UNAVAILABLE')
+      }
+      if (response.status === 502 || response.status === 504) {
+        throw new Error('UPSTREAM_UNAVAILABLE')
+      }
+      
       throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
 
     return await response.json()
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      console.error(`API request timed out: ${path}`)
+      throw new Error('NETWORK_TIMEOUT')
+    }
     console.error(`API request failed: ${path}`, error)
     throw error
   }
