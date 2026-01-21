@@ -1,12 +1,14 @@
 export const strings = {
   app: {
-    name: 'El Riche Patchbay',
+    name: 'Pepper',
     tagline: 'Studio patchbay control',
     loadingData: 'Loading data...',
     retry: 'Retry',
     syncing: 'Syncing...',
     synced: 'Synced',
     syncIssue: 'Sync issue',
+    authDegradedTitle: 'Session validation unavailable.',
+    authDegradedMessage: 'The server cannot validate sessions right now. Please retry shortly.',
     export: 'Export',
     help: 'Help',
     shortcuts: 'Shortcuts',
@@ -42,6 +44,8 @@ export const strings = {
     imageParseFailed: 'Image parsing failed. Try a clearer, well-lit photo.',
     sessionExpired: 'Sesión expirada. Por favor, volvé a iniciar sesión.',
     noPermission: 'No tenés permisos para acceder a estos datos.',
+    authServiceUnavailable: 'El servidor no puede validar la sesión ahora. Intentá de nuevo en unos minutos.',
+    networkTimeout: 'La solicitud tardó demasiado. Verificá tu conexión y reintentá.',
   },
   patchbay: {
     linkingBanner: (deviceName: string, portLabel: string) =>

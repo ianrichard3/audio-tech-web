@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect, watch } from 'vue'
+import { computed, watchEffect, watch } from 'vue'
 import { SignedIn, SignedOut, UserButton, OrganizationSwitcher, useAuth, useOrganization, useClerk } from '@clerk/vue'
 import { registerTokenGetter } from './lib/authToken'
 import PatchBayGrid from './components/PatchBayGrid.vue'
@@ -16,8 +16,9 @@ const { isLoaded, isSignedIn, getToken, orgId } = useAuth()
 const { isLoaded: orgLoaded } = useOrganization()
 const clerk = useClerk()
 
-// Estado para manejar el requerimiento de organización
-const needsOrganization = ref(false)
+const needsOrganization = computed(() => {
+  return isSignedIn.value && (!orgId.value || store.orgRequired)
+})
 
 // Registrar la función getToken para que api.ts pueda usarla
 watchEffect(() => {
@@ -25,7 +26,15 @@ watchEffect(() => {
     // getToken es un ComputedRef, necesitamos extraer su función
     const tokenFn = getToken.value
     if (tokenFn) {
-      registerTokenGetter(tokenFn)
+      const jwtTemplate = import.meta.env.VITE_CLERK_JWT_TEMPLATE
+      const audience = import.meta.env.VITE_CLERK_AUDIENCE
+      const wrappedTokenFn = (options?: { skipCache?: boolean }) => {
+        const tokenOptions: Record<string, unknown> = { ...(options || {}) }
+        if (jwtTemplate) tokenOptions.template = jwtTemplate
+        if (audience) tokenOptions.audience = audience
+        return tokenFn(tokenOptions as { skipCache?: boolean })
+      }
+      registerTokenGetter(wrappedTokenFn)
     }
   }
 })
@@ -54,23 +63,13 @@ watchEffect(() => {
   
   if (userSignedIn && hasOrg) {
     // Usuario autenticado con org activa
-    needsOrganization.value = false
-    
     // Solo cargar si no se han cargado datos aún y no hay error de auth
     if (!store.hasLoadedInitialData && !store.loading && !store.authError) {
       console.log('[App] Loading initial data...')
       store.loadData()
     }
   } else if (userSignedIn && !hasOrg) {
-    // Usuario autenticado pero sin org activa
-    needsOrganization.value = true
-  }
-})
-
-// Detectar cuando el error es por falta de organización
-watchEffect(() => {
-  if (store.error && store.error.includes('organization required')) {
-    needsOrganization.value = true
+    // Usuario autenticado pero sin org activa (la UI lo maneja)
   }
 })
 
@@ -144,6 +143,13 @@ const notifyComingSoon = () => {
 
     <!-- Main App (only when org is active) -->
     <div v-else class="app-container">
+      <div v-if="store.backendAuthDegraded" class="auth-degraded-banner">
+        <div class="auth-degraded-text">
+          <strong>{{ t.app.authDegradedTitle }}</strong>
+          <span>{{ t.app.authDegradedMessage }}</span>
+        </div>
+        <button class="ghost-btn" @click="store.retryInitialLoad()">{{ t.app.retry }}</button>
+      </div>
       <div v-if="store.loading" class="loading-overlay">
         <div class="loading-card">{{ t.app.loadingData }}</div>
       </div>
@@ -289,6 +295,24 @@ const notifyComingSoon = () => {
   flex-direction: column;
   height: 100vh;
   animation: fade-in 0.6s ease-out;
+}
+
+.auth-degraded-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: rgba(176, 75, 61, 0.15);
+  border-bottom: 1px solid rgba(176, 75, 61, 0.4);
+  color: var(--text-primary);
+}
+
+.auth-degraded-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.95rem;
 }
 
 .topbar {

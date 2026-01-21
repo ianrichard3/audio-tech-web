@@ -175,7 +175,17 @@ if (response.status === 401) {
   throw new Error('AUTH_EXPIRED')
 }
 if (response.status === 403) {
+  // Si el backend responde "Active organization required"
+  throw new Error('ORG_REQUIRED')
+}
+if (response.status === 403) {
   throw new Error('AUTH_FORBIDDEN')
+}
+if (response.status === 503) {
+  throw new Error('AUTH_SERVICE_UNAVAILABLE')
+}
+if (response.status === 502 || response.status === 504) {
+  throw new Error('UPSTREAM_UNAVAILABLE')
 }
 ```
 
@@ -218,17 +228,24 @@ async loadData() {
     if (err.message === 'AUTH_EXPIRED') {
       this.error = 'Sesión expirada...'
       this.pushToast({ type: 'error', message: this.error })
-    } else if (err.message === 'AUTH_FORBIDDEN') {
+    } else if (err.message === 'ORG_REQUIRED') {
       this.error = 'Active organization required'
       // NO toast - la UI maneja esto con pantalla dedicada
+    } else if (err.message === 'AUTH_FORBIDDEN') {
+      this.error = 'No tenés permisos'
+      this.pushToast({ type: 'error', message: this.error })
+    } else if (err.message === 'AUTH_SERVICE_UNAVAILABLE') {
+      this.error = 'Session validation unavailable'
+      // Mostrar banner y permitir reintento manual
     }
   }
 }
 ```
 
 **Importante**: 
-- `AUTH_FORBIDDEN` no muestra toast
+- `ORG_REQUIRED` no muestra toast
 - `App.vue` detecta el error y muestra la pantalla de org
+- `AUTH_SERVICE_UNAVAILABLE` no desloguea al usuario
 
 ## Contrato con el Backend
 

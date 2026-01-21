@@ -48,6 +48,23 @@ else
     echo "✅ VITE_API_URL configurada: $VITE_API_URL"
 fi
 
+# Check for optional token contract settings
+if [ -n "$VITE_CLERK_JWT_TEMPLATE" ]; then
+    echo "✅ VITE_CLERK_JWT_TEMPLATE configurada: $VITE_CLERK_JWT_TEMPLATE"
+else
+    echo "ℹ️  VITE_CLERK_JWT_TEMPLATE no configurada (solo necesaria si el backend exige template)"
+fi
+
+if [ -n "$VITE_CLERK_AUDIENCE" ]; then
+    echo "✅ VITE_CLERK_AUDIENCE configurada: $VITE_CLERK_AUDIENCE"
+else
+    echo "ℹ️  VITE_CLERK_AUDIENCE no configurada (solo necesaria si el backend exige audience)"
+fi
+
+if [ -z "$VITE_CLERK_JWT_TEMPLATE" ] && [ -z "$VITE_CLERK_AUDIENCE" ]; then
+    echo "⚠️  Sin template/audience configurado. Si el backend tiene aud/iss estrictos, vas a recibir 401."
+fi
+
 # Check if @clerk/vue is installed
 if [ -d "node_modules/@clerk/vue" ]; then
     CLERK_VERSION=$(node -p "require('./node_modules/@clerk/vue/package.json').version")

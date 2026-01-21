@@ -67,6 +67,12 @@ VITE_API_URL=http://localhost:8088
 
 # Clerk Publishable Key (REQUERIDO)
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_tu_key_aqui
+
+# Clerk JWT template (OPCIONAL, recomendado si el backend exige aud/claims)
+# VITE_CLERK_JWT_TEMPLATE=backend_api
+
+# Clerk Audience (OPCIONAL si el backend valida aud)
+# VITE_CLERK_AUDIENCE=https://api.tupatchbay.com
 ```
 
 ### 4. Iniciar Desarrollo
@@ -246,6 +252,8 @@ vercel
 # Configurar env vars en Vercel dashboard:
 # - VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
 # - VITE_API_URL=https://api.tu-dominio.com
+# - VITE_CLERK_JWT_TEMPLATE=backend_api (opcional)
+# - VITE_CLERK_AUDIENCE=https://api.tu-dominio.com (opcional)
 ```
 
 ## 📚 Documentación Adicional
@@ -276,6 +284,15 @@ vercel
 2. "Manage Organizations" → Crear o seleccionar una
 3. Refrescar la página
 
+### "Unauthorized" (401) constante con usuario logueado
+
+**Causa**: Token emitido con template/audience incorrecto para el backend.
+
+**Solución**:
+1. Revisar `VITE_CLERK_JWT_TEMPLATE` / `VITE_CLERK_AUDIENCE`
+2. Alinear con el backend (aud/iss estrictos)
+3. Ejecutar `npm run verify-clerk` para validar configuración
+
 ### "Token validation failed" en el backend
 
 **Causa**: Backend no puede validar el JWT de Clerk.
@@ -284,6 +301,15 @@ vercel
 1. Verificar que el backend tiene `CLERK_ISSUER_URL` configurada
 2. Verificar que el backend puede acceder a internet (para JWKS)
 3. Verificar que usás la misma app de Clerk en frontend y backend
+
+### "Session validation unavailable" / 503
+
+**Causa**: El backend no puede acceder a JWKS o hay un problema temporal de infraestructura.
+
+**Solución**:
+1. Esperar unos minutos y reintentar (no hace falta cerrar sesión)
+2. Verificar conectividad del backend con Clerk (JWKS/issuer)
+3. Revisar logs del backend para errores de JWKS
 
 ### Más ayuda
 

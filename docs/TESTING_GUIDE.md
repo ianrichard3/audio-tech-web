@@ -199,7 +199,40 @@ Error loading data: AUTH_EXPIRED
 
 ---
 
-### Test 7: Upload de Imagen de Device
+### Test 7: Servicio de validación de sesión no disponible (503)
+
+**Objetivo**: Verificar que el frontend no desloguea si el backend no puede validar JWKS.
+
+**Pasos**:
+1. Login con org activa
+2. Simular en backend una falla de JWKS (o devolver 503 en `/state`)
+3. Recargar la app
+
+**Resultado Esperado**:
+- ✅ El backend responde 503
+- ✅ La UI muestra banner de "Session validation unavailable"
+- ✅ El usuario sigue logueado
+- ✅ Botón "Retry" reintenta la carga
+
+---
+
+### Test 8: Audience/Template mal configurado (401 persistente)
+
+**Objetivo**: Verificar que el error se detecta y guía a revisar configuración.
+
+**Pasos**:
+1. Configurar un `VITE_CLERK_JWT_TEMPLATE` que no exista (o `VITE_CLERK_AUDIENCE` incorrecta)
+2. Login con org activa
+3. Intentar cargar la app
+
+**Resultado Esperado**:
+- ✅ Respuestas 401 persistentes
+- ✅ UI muestra error de autenticación (sin logout inmediato)
+- ✅ `npm run verify-clerk` advierte sobre template/audience faltante o incorrecta
+
+---
+
+### Test 9: Upload de Imagen de Device
 
 **Objetivo**: Verificar que los uploads también llevan el token.
 
@@ -233,7 +266,7 @@ Form Data:
 
 ---
 
-### Test 8: AI Parse Image
+### Test 10: AI Parse Image
 
 **Objetivo**: Verificar que el endpoint de AI también está autenticado.
 
@@ -258,7 +291,7 @@ Authorization: Bearer eyJ...
 
 ---
 
-### Test 9: Cambio de Organización Mid-Session
+### Test 11: Cambio de Organización Mid-Session
 
 **Objetivo**: Verificar que cambiar de org carga los datos correctos.
 
@@ -294,7 +327,7 @@ window.Clerk.organization.id // org_B_id
 
 ---
 
-### Test 10: Múltiples Tabs (Concurrencia)
+### Test 12: Múltiples Tabs (Concurrencia)
 
 **Objetivo**: Verificar que múltiples tabs no causan doble carga.
 
@@ -334,6 +367,7 @@ Antes de dar por completada la implementación:
 - [ ] 401 → retry automático transparente
 - [ ] 401 persistente → mensaje de sesión expirada
 - [ ] 403 (sin org) → pantalla de selección de org
+- [ ] 503 (JWKS/infra) → banner de servicio no disponible, sin logout
 - [ ] Error de red → toast de error genérico
 
 ### UX

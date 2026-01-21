@@ -82,6 +82,9 @@ export const store = reactive({
   error: null as string | null,
   hasLoadedInitialData: false, // Flag to prevent multiple loads
   authError: false, // Flag to prevent retry loops on auth errors
+  orgRequired: false,
+  backendAuthDegraded: false,
+  loadPromise: null as Promise<void> | null,
   activeTab: 'devices', // 'patchbay' | 'devices' | 'connections'
   selectionMode: false,
   pendingLink: null as PendingLink | null, // The port waiting to be linked (from Device -> Patchbay flow)
@@ -98,9 +101,9 @@ export const store = reactive({
   // Load data from API
   async loadData() {
     // Prevenir múltiples cargas simultáneas o reintentos después de errores de auth
-    if (this.loading) {
-      console.log('[Store] Already loading, skipping duplicate loadData call')
-      return
+    if (this.loadPromise) {
+      console.log('[Store] Load already in-flight, reusing promise')
+      return this.loadPromise
     }
     
     if (this.authError) {
@@ -110,38 +113,81 @@ export const store = reactive({
 
     this.loading = true
     this.error = null
+    this.orgRequired = false
     
-    try {
-      const state = await api.getState()
-      this.patchbayNodes = state.patchbay_points.map(apiPatchbayToNode)
-      this.devices = state.devices.map(apiDeviceToDevice)
-      this.hasLoadedInitialData = true
-      this.authError = false // Clear auth error on success
-      console.log('[Store] Data loaded successfully:', {
-        patchbayNodes: this.patchbayNodes.length,
-        devices: this.devices.length
-      })
-    } catch (err: any) {
-      // Handle auth-specific errors
-      if (err.message === 'AUTH_EXPIRED') {
-        this.error = strings.toast.sessionExpired || 'Sesión expirada. Por favor, volvé a iniciar sesión.'
-        this.authError = true // Prevent retry loop
-        this.pushToast({ type: 'error', message: this.error })
-        console.error('[Store] Auth expired - user will be signed out')
-      } else if (err.message === 'AUTH_FORBIDDEN') {
-        // Este error significa que falta org activa - la UI debe manejarlo
-        this.error = 'Active organization required'
-        this.authError = true // Prevent retry loop
-        console.warn('[Store] Organization required - user needs to select/create org')
-        // NO mostrar toast aquí - la UI ya mostrará la pantalla de org
-      } else {
-        this.error = err.message || strings.toast.loadFailed
-        this.pushToast({ type: 'error', message: this.error || strings.toast.loadFailed })
+    const loadPromise = (async () => {
+      try {
+        const state = await api.getState()
+        this.patchbayNodes = state.patchbay_points.map(apiPatchbayToNode)
+        this.devices = state.devices.map(apiDeviceToDevice)
+        this.hasLoadedInitialData = true
+        this.authError = false // Clear auth error on success
+        this.backendAuthDegraded = false
+        console.log('[Store] Data loaded successfully:', {
+          patchbayNodes: this.patchbayNodes.length,
+          devices: this.devices.length
+        })
+      } catch (err: any) {
+        // Handle auth-specific errors
+        if (err.message === 'AUTH_EXPIRED') {
+          this.error = strings.toast.sessionExpired || 'Sesión expirada. Por favor, volvé a iniciar sesión.'
+          this.authError = true // Prevent retry loop
+          this.pushToast({ type: 'error', message: this.error })
+          console.error('[Store] Auth expired - user will be signed out')
+        } else if (err.message === 'ORG_REQUIRED') {
+          this.error = 'Active organization required'
+          this.orgRequired = true
+          console.warn('[Store] Organization required - user needs to select/create org')
+          // NO mostrar toast aquí - la UI ya mostrará la pantalla de org
+        } else if (err.message === 'AUTH_FORBIDDEN') {
+          this.error = strings.toast.noPermission
+          this.pushToast({ type: 'error', message: this.error })
+        } else if (err.message === 'AUTH_SERVICE_UNAVAILABLE') {
+          this.error = strings.toast.authServiceUnavailable
+          this.backendAuthDegraded = true
+          console.warn('[Store] Auth service unavailable - keeping session active')
+        } else if (err.message === 'NETWORK_TIMEOUT') {
+          this.error = strings.toast.networkTimeout
+          this.pushToast({ type: 'error', message: this.error })
+        } else if (err.message === 'UPSTREAM_UNAVAILABLE') {
+          this.error = strings.toast.loadFailed
+          this.pushToast({ type: 'error', message: this.error })
+        } else {
+          this.error = err.message || strings.toast.loadFailed
+          this.pushToast({ type: 'error', message: this.error || strings.toast.loadFailed })
+        }
+        console.error('[Store] Error loading data:', err)
+      } finally {
+        this.loading = false
+        this.loadPromise = null
       }
-      console.error('[Store] Error loading data:', err)
-    } finally {
-      this.loading = false
+    })()
+
+    this.loadPromise = loadPromise
+    return loadPromise
+  },
+
+  retryInitialLoad() {
+    this.backendAuthDegraded = false
+    this.error = null
+    return this.loadData()
+  },
+
+  handleApiError(err: any, fallbackMessage: string) {
+    if (err?.message === 'AUTH_SERVICE_UNAVAILABLE') {
+      this.backendAuthDegraded = true
+      this.pushToast({ type: 'error', message: strings.toast.authServiceUnavailable })
+      return true
     }
+    if (err?.message === 'NETWORK_TIMEOUT') {
+      this.pushToast({ type: 'error', message: strings.toast.networkTimeout })
+      return true
+    }
+    if (err?.message === 'UPSTREAM_UNAVAILABLE') {
+      this.pushToast({ type: 'error', message: fallbackMessage })
+      return true
+    }
+    return false
   },
   
   // Reset state (llamar cuando el usuario se desloguea o cambia de org)
@@ -153,6 +199,9 @@ export const store = reactive({
     this.error = null
     this.hasLoadedInitialData = false
     this.authError = false
+    this.orgRequired = false
+    this.backendAuthDegraded = false
+    this.loadPromise = null
     this.activeTab = 'devices'
     this.selectionMode = false
     this.pendingLink = null
@@ -217,6 +266,10 @@ export const store = reactive({
         ),
       })
     } catch (err: any) {
+      if (this.handleApiError(err, strings.toast.linkFailed)) {
+        console.error('Error linking port:', err)
+        return
+      }
       console.error('Error linking port:', err)
       this.pushToast({ type: 'error', message: err.message || strings.toast.linkFailed })
       return
@@ -244,6 +297,10 @@ export const store = reactive({
         if (port) port.patchbayId = null
       }
     } catch (err: any) {
+      if (this.handleApiError(err, strings.toast.unlinkFailed)) {
+        console.error('Error unlinking port:', err)
+        return
+      }
       console.error('Error unlinking port:', err)
       this.pushToast({ type: 'error', message: err.message || strings.toast.unlinkFailed })
     }
@@ -275,6 +332,10 @@ export const store = reactive({
       }
       return true
     } catch (err: any) {
+      if (this.handleApiError(err, strings.toast.linkFailed)) {
+        console.error('Error linking patchbay to device:', err)
+        return false
+      }
       console.error('Error linking patchbay to device:', err)
       this.pushToast({ type: 'error', message: err.message || strings.toast.linkFailed })
       return false
@@ -297,6 +358,7 @@ export const store = reactive({
       this.devices.push(newDevice)
       return newDevice
     } catch (err: any) {
+      this.handleApiError(err, strings.toast.deviceSaveFailed)
       console.error('Error adding device:', err)
       throw err
     }
@@ -322,6 +384,7 @@ export const store = reactive({
       }
       return updatedDevice
     } catch (err: any) {
+      this.handleApiError(err, strings.toast.deviceSaveFailed)
       console.error('Error updating device:', err)
       throw err
     }
@@ -339,6 +402,7 @@ export const store = reactive({
         this.selectedDevice = null
       }
     } catch (err: any) {
+      this.handleApiError(err, strings.toast.deviceDeleteFailed)
       console.error('Error deleting device:', err)
       throw err
     }
@@ -362,6 +426,7 @@ export const store = reactive({
       
       return updatedDevice
     } catch (err: any) {
+      this.handleApiError(err, strings.toast.deviceSaveFailed)
       console.error('Error uploading device image:', err)
       throw err
     }

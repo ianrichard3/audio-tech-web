@@ -51,6 +51,22 @@ El backend requiere **sí o sí**:
    VITE_CLERK_PUBLISHABLE_KEY=pk_test_tu_key_aquí
    ```
 
+### 1.5 (Opcional) JWT Template / Audience
+
+Si el backend valida `aud` o necesita claims custom, configurá un JWT template en Clerk y pasá su nombre al frontend:
+
+```
+VITE_CLERK_JWT_TEMPLATE=backend_api
+```
+
+Alternativamente, si el backend valida un audience específico:
+
+```
+VITE_CLERK_AUDIENCE=https://api.tupatchbay.com
+```
+
+> Tip: Si el backend vuelve obligatorio `aud`, necesitás que el frontend pida tokens con template/audience compatible.
+
 ## Fase 2: Crear Usuario y Organización de Prueba
 
 ### 2.1 Crear Usuario de Prueba
@@ -132,6 +148,15 @@ Este script verifica:
 - Los tokens expiran aprox. cada 1 hora
 - La app reintentará automáticamente con token fresco
 - Si persiste, hacer logout y volver a entrar
+
+### Error: "Session validation unavailable" / 503
+
+**Causa**: El backend no pudo acceder a JWKS o hay un problema temporal de infraestructura.
+
+**Solución**:
+1. Esperar unos minutos y reintentar
+2. Verificar conectividad del backend con Clerk (JWKS/issuer)
+3. Revisar logs del backend para errores de JWKS
 
 ### Error: "Pantalla en blanco"
 

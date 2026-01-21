@@ -17,6 +17,12 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_live_XXXXXXXXXXXXXXXXXX
 # REQUERIDO - URL del backend de producción
 VITE_API_URL=https://api.tupatchbay.com
 
+# OPCIONAL - JWT template (si backend exige template/aud estrictos)
+VITE_CLERK_JWT_TEMPLATE=backend_api
+
+# OPCIONAL - Audience (si backend valida aud)
+VITE_CLERK_AUDIENCE=https://api.tupatchbay.com
+
 # OPCIONAL - Analytics, monitoring, etc.
 VITE_SENTRY_DSN=...
 ```
@@ -41,6 +47,18 @@ ALLOWED_ORIGINS=https://tupatchbay.com,https://www.tupatchbay.com
 **Verificar**:
 - ✅ `CLERK_ISSUER_URL` coincide con tu app de Clerk
 - ✅ `ALLOWED_ORIGINS` incluye el dominio del frontend
+
+---
+
+## Plan de Rollout sin Downtime (aud/iss estrictos)
+
+Si vas a endurecer `aud`/`iss` en el backend:
+
+1. Backend acepta `aud` opcional temporalmente
+2. Frontend se deploya solicitando token con `VITE_CLERK_JWT_TEMPLATE` o `VITE_CLERK_AUDIENCE`
+3. Backend pasa a `aud` obligatorio
+
+Esto evita 401 masivos por desalineación de token.
 
 ---
 
