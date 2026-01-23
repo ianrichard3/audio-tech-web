@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { api, type ApiPort, type ApiDevice, type ApiPatchbayPoint } from '@/lib/api'
+import { deviceImageCache } from '@/lib/deviceImageCache'
 import { strings } from '@/ui/strings'
 
 // Types
@@ -213,6 +214,7 @@ export const store = reactive({
       a: null,
       b: null,
     }
+    deviceImageCache.clearAll()
     console.log('[Store] State reset')
   },
   
@@ -401,6 +403,7 @@ export const store = reactive({
       if (this.selectedDevice?.id === id) {
         this.selectedDevice = null
       }
+      deviceImageCache.invalidateDevice(id)
     } catch (err: any) {
       this.handleApiError(err, strings.toast.deviceDeleteFailed)
       console.error('Error deleting device:', err)
@@ -423,6 +426,8 @@ export const store = reactive({
       if (this.selectedDevice?.id === deviceId) {
         this.selectedDevice = updatedDevice
       }
+
+      deviceImageCache.invalidateDevice(deviceId)
       
       return updatedDevice
     } catch (err: any) {

@@ -91,6 +91,17 @@ export interface ApiDeviceUpdate {
   }>
 }
 
+export type FetchImageResult =
+  | { status: 'ok'; blobUrl: string }
+  | { status: 'not_found' }
+  | { status: 'forbidden' }
+  | { status: 'timeout' }
+  | { status: 'unauthorized' }
+  | { status: 'aborted' }
+  | { status: 'error'; error: string }
+
+export type FetchImageFn = (imageUrl: string, options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<FetchImageResult>
+
 // HTTP client
 async function request<T>(path: string, options?: RequestInit, isRetry = false): Promise<T> {
   const url = `${API_URL}${path}`
@@ -153,7 +164,9 @@ async function request<T>(path: string, options?: RequestInit, isRetry = false):
         throw new Error('UPSTREAM_UNAVAILABLE')
       }
       
-      throw new Error(`HTTP ${response.status}: ${errorText}`)
+      const error = new Error(`HTTP ${response.status}: ${errorText}`)
+      ;(error as any).status = response.status
+      throw error
     }
 
     return await response.json()
@@ -217,10 +230,20 @@ export const api = {
     const formData = new FormData()
     formData.append('image', image)
 
-    return request<ApiDevice>('/devices/parse-image', {
-      method: 'POST',
-      body: formData,
-    })
+    try {
+      return await request<ApiDevice>('/devices/parse-image', {
+        method: 'POST',
+        body: formData,
+      })
+    } catch (err: any) {
+      if (err?.status === 404 || String(err?.message || '').includes('HTTP 404')) {
+        return request<ApiDevice>('/ai/parse-image', {
+          method: 'POST',
+          body: formData,
+        })
+      }
+      throw err
+    }
   },
 
   async uploadDeviceImage(deviceId: number, image: File): Promise<ApiDevice> {
@@ -255,5 +278,51 @@ export const api = {
     const base = this.buildAbsoluteUrl(imageUrl)
     const cacheBust = imageUpdatedAt ? `?v=${encodeURIComponent(imageUpdatedAt)}` : ''
     return base + cacheBust
+  },
+
+  // Fetch image with authentication and return blob URL
+  async fetchAuthenticatedImage(imageUrl: string, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<FetchImageResult> {
+    const url = this.buildAbsoluteUrl(imageUrl)
+    const timeoutMs = options?.timeoutMs ?? 10000
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+    if (options?.signal) {
+      if (options.signal.aborted) controller.abort()
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+
+    const doFetch = async (token?: string | null) => {
+      return fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        signal: controller.signal,
+      })
+    }
+
+    try {
+      const token = await getAuthToken()
+      let response = await doFetch(token)
+
+      if (response.status === 401) {
+        const freshToken = await getAuthToken({ skipCache: true })
+        response = await doFetch(freshToken)
+      }
+
+      if (response.status === 404) return { status: 'not_found' }
+      if (response.status === 403) return { status: 'forbidden' }
+      if (response.status === 401) return { status: 'unauthorized' }
+      if (!response.ok) return { status: 'error', error: `HTTP ${response.status}` }
+
+      const blob = await response.blob()
+      return { status: 'ok', blobUrl: URL.createObjectURL(blob) }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return { status: options?.signal?.aborted ? 'aborted' : 'timeout' }
+      }
+      return { status: 'error', error: error?.message || 'Unknown error' }
+    } finally {
+      clearTimeout(timeoutId)
+    }
   },
 }

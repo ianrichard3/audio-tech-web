@@ -8,7 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "verify-clerk": "./scripts/verify-clerk-setup.sh",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@clerk/vue": "^1.17.8",
@@ -20,8 +21,10 @@
     "@types/node": "^20.11.30",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vue/tsconfig": "^0.7.0",
+    "jsdom": "^26.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.1.2",
+    "vitest": "^2.1.9",
     "vue-tsc": "^3.0.5"
   }
 }
