@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, watchEffect, watch } from 'vue'
-import { SignedIn, SignedOut, UserButton, OrganizationSwitcher, useAuth, useOrganization, useClerk } from '@clerk/vue'
+import { SignedIn, SignedOut, UserButton, OrganizationSwitcher, useAuth, useClerk } from '@clerk/vue'
 import { registerTokenGetter } from './lib/authToken'
 import PatchBayGrid from './components/PatchBayGrid.vue'
 import DevicesManager from './components/DevicesManager.vue'
@@ -13,8 +13,13 @@ import logoUrl from './assets/el-riche-mark.svg'
 
 const t = strings
 const { isLoaded, isSignedIn, getToken, orgId } = useAuth()
-const { isLoaded: orgLoaded } = useOrganization()
 const clerk = useClerk()
+
+// orgLoaded se considera true cuando el usuario no está autenticado
+// o cuando Clerk está completamente cargado
+const orgLoaded = computed(() => {
+  return !isSignedIn.value || isLoaded.value
+})
 
 const needsOrganization = computed(() => {
   return isSignedIn.value && (!orgId.value || store.orgRequired)

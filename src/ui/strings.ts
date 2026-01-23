@@ -121,6 +121,12 @@ export const strings = {
       processing: '2 Processing',
       review: '3 Review',
     },
+    imageLoading: 'Cargando...',
+    imageLoadFailed: 'Error al cargar',
+    imageMissing: 'Sin imagen',
+    imageNoAccess: 'Sin permisos',
+    imageUnauthorized: 'Sesión expirada',
+    imageTimeout: 'Tiempo agotado',
     addPortLabel: (index: number) => `Port ${index}`,
     validation: {
       addPortFirst: 'Add at least one port.',

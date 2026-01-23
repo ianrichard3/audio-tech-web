@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, watch, watchEffect, onBeforeUnmount, onMounted, type ComponentPublicInstance, type VNodeRef } from 'vue'
+import { useAuth } from '@clerk/vue'
 import { api } from '../lib/api'
 import { store, type Device, type DevicePort } from '../store'
 import { strings } from '../ui/strings'
 import ConfirmDialog from '../ui/ConfirmDialog.vue'
+import { useDeviceImages } from '@/composables/useDeviceImages'
 
 const t = strings
+const { orgId } = useAuth()
+const deviceImages = useDeviceImages()
 
 const searchQuery = ref('')
 const isLoading = ref(false)
@@ -15,8 +19,65 @@ const updateViewport = () => {
   isDesktop.value = window.innerWidth >= 1024
 }
 
+const PREFETCH_COUNT = 12
+const PREFETCH_IDLE_TIMEOUT = 2000
+const OBSERVER_ROOT_MARGIN = '400px 0px'
+
+const observer = ref<IntersectionObserver | null>(null)
+const elementToDeviceId = new Map<Element, number>()
+let prefetchHandle: ReturnType<typeof setTimeout> | null = null
+let lastDeviceImageLog = 0
+
+const registerDeviceCard = (deviceId: number): VNodeRef => (el: Element | ComponentPublicInstance | null) => {
+  const currentObserver = observer.value
+  if (!currentObserver) return
+
+  const element = el instanceof Element ? el : (el?.$el as Element | null)
+  if (!element) return
+
+  for (const [element, id] of elementToDeviceId.entries()) {
+    if (id === deviceId) {
+      currentObserver.unobserve(element)
+      elementToDeviceId.delete(element)
+      break
+    }
+  }
+
+  elementToDeviceId.set(element, deviceId)
+  currentObserver.observe(element)
+}
+
+const schedulePrefetch = (devices: Device[]) => {
+  if (prefetchHandle) {
+    window.clearTimeout(prefetchHandle)
+    prefetchHandle = null
+  }
+
+  const candidates = devices.slice(0, PREFETCH_COUNT)
+  const run = () => {
+    void deviceImages.prefetch(candidates, orgId.value, { concurrency: 2 })
+  }
+
+  const idle = (window as unknown as { requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => void }).requestIdleCallback
+  if (idle) {
+    idle(run, { timeout: PREFETCH_IDLE_TIMEOUT })
+  } else {
+    prefetchHandle = globalThis.setTimeout(run, PREFETCH_IDLE_TIMEOUT)
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', updateViewport)
+  observer.value = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const deviceId = elementToDeviceId.get(entry.target)
+      if (!deviceId) continue
+      if (!entry.isIntersecting) continue
+      const device = store.devices.find(item => item.id === deviceId)
+      if (!device) continue
+      deviceImages.request(device, orgId.value, { priority: 'high' })
+    }
+  }, { rootMargin: OBSERVER_ROOT_MARGIN, threshold: 0.01 })
 })
 
 const showError = (message: string) => {
@@ -227,9 +288,70 @@ const clearPendingImage = () => {
   pendingImageError.value = null
 }
 
-const getDeviceImageSrc = (device: Device) => {
-  return api.getDeviceImageSrc(device.imageUrl, device.imageUpdatedAt)
+const getDeviceImageState = (device: Device) => {
+  return deviceImages.getState(device, orgId.value)
 }
+
+const requestDeviceImage = (device: Device) => {
+  deviceImages.request(device, orgId.value, { priority: 'high' })
+}
+
+const retryDeviceImage = (device: Device) => {
+  deviceImages.invalidateDevice(device.id, orgId.value)
+  requestDeviceImage(device)
+}
+
+const isImageLoading = (state: ReturnType<typeof getDeviceImageState>) => {
+  return state.status === 'idle' || state.status === 'loading'
+}
+
+const isImageRetryable = (state: ReturnType<typeof getDeviceImageState>) => {
+  return ['timeout', 'error', 'unauthorized', 'aborted'].includes(state.status)
+}
+
+const imageStatusLabel = (state: ReturnType<typeof getDeviceImageState>) => {
+  if (state.status === 'forbidden') return t.devices.imageNoAccess || 'Sin permisos'
+  if (state.status === 'not_found') return t.devices.imageMissing || 'Sin imagen'
+  if (state.status === 'timeout') return t.devices.imageTimeout || 'Tiempo agotado'
+  if (state.status === 'unauthorized') return t.devices.imageUnauthorized || 'Sesión expirada'
+  if (state.status === 'error') return t.devices.imageLoadFailed || 'Error al cargar'
+  return t.devices.imageLoading || 'Cargando...'
+}
+
+watch(filteredDevices, (devices) => {
+  const ids = new Set(devices.map(device => device.id))
+  deviceImages.abortNotInSet(ids, orgId.value)
+  schedulePrefetch(devices)
+}, { immediate: true })
+
+watch(() => selectedDevice.value?.id, () => {
+  if (selectedDevice.value) {
+    requestDeviceImage(selectedDevice.value)
+  }
+})
+
+watch(() => showAddModal.value, (open) => {
+  if (!open) return
+  if (isEditing.value && selectedDevice.value?.imageUrl) {
+    requestDeviceImage(selectedDevice.value)
+  }
+})
+
+watch(() => store.activeTab, (tab) => {
+  if (tab !== 'devices') {
+    deviceImages.abortAll()
+  }
+})
+
+watchEffect(() => {
+  if (!import.meta.env.DEV) return
+  deviceImages.version.value
+  const now = Date.now()
+  if (now - lastDeviceImageLog > 30000) {
+    lastDeviceImageLog = now
+    console.debug('[DeviceImages]', deviceImages.getStats())
+  }
+})
 
 const handleResetForm = () => {
   if (isEditing.value && editSnapshot.value) {
@@ -340,6 +462,7 @@ const handleAddDevice = async () => {
         if (selectedDevice.value?.id === deviceId) {
           selectedDevice.value = updatedDevice
         }
+        requestDeviceImage(updatedDevice)
       } catch (imgErr: any) {
         showError(`Device saved, but image upload failed: ${imgErr.message || 'Unknown error'}`)
         console.error('Error uploading device image:', imgErr)
@@ -443,6 +566,10 @@ watch(() => store.activeTab, (tab) => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewport)
+  if (observer.value) {
+    observer.value.disconnect()
+  }
+  elementToDeviceId.clear()
   if (aiPreviewUrl.value) {
     URL.revokeObjectURL(aiPreviewUrl.value)
   }
@@ -476,10 +603,39 @@ onBeforeUnmount(() => {
           :key="device.id"
           class="device-card"
           :class="{ active: selectedDevice?.id === device.id }"
+          :ref="registerDeviceCard(device.id)"
           @click="selectDevice(device)"
         >
           <div v-if="device.imageUrl" class="device-thumbnail">
-            <img :src="getDeviceImageSrc(device) || ''" :alt="device.name" />
+            <img
+              v-if="getDeviceImageState(device).status === 'loaded' && getDeviceImageState(device).src"
+              :src="getDeviceImageState(device).src || ''"
+              :alt="device.name"
+              loading="lazy"
+            />
+            <div
+              v-else
+              class="device-thumbnail-placeholder"
+              :class="{ 'is-loading': isImageLoading(getDeviceImageState(device)) }"
+            >
+              <div v-if="isImageLoading(getDeviceImageState(device))" class="image-skeleton"></div>
+              <div v-else class="image-fallback">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span class="image-status">{{ imageStatusLabel(getDeviceImageState(device)) }}</span>
+                <button
+                  v-if="isImageRetryable(getDeviceImageState(device))"
+                  class="retry-btn"
+                  type="button"
+                  @click.stop="retryDeviceImage(device)"
+                >
+                  {{ t.app.retry }}
+                </button>
+              </div>
+            </div>
           </div>
           <div v-else class="device-thumbnail-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -519,7 +675,34 @@ onBeforeUnmount(() => {
 
         <div class="device-details">
           <div v-if="selectedDevice.imageUrl" class="device-detail-image">
-            <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
+            <img
+              v-if="getDeviceImageState(selectedDevice).status === 'loaded' && getDeviceImageState(selectedDevice).src"
+              :src="getDeviceImageState(selectedDevice).src || ''"
+              :alt="selectedDevice.name"
+            />
+            <div
+              v-else
+              class="device-detail-placeholder"
+              :class="{ 'is-loading': isImageLoading(getDeviceImageState(selectedDevice)) }"
+            >
+              <div v-if="isImageLoading(getDeviceImageState(selectedDevice))" class="image-skeleton"></div>
+              <div v-else class="image-fallback">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span class="image-status">{{ imageStatusLabel(getDeviceImageState(selectedDevice)) }}</span>
+                <button
+                  v-if="isImageRetryable(getDeviceImageState(selectedDevice))"
+                  class="retry-btn"
+                  type="button"
+                  @click.stop="retryDeviceImage(selectedDevice)"
+                >
+                  {{ t.app.retry }}
+                </button>
+              </div>
+            </div>
           </div>
           
           <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
@@ -565,7 +748,34 @@ onBeforeUnmount(() => {
 
         <div class="device-details">
           <div v-if="selectedDevice.imageUrl" class="device-detail-image">
-            <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
+            <img
+              v-if="getDeviceImageState(selectedDevice).status === 'loaded' && getDeviceImageState(selectedDevice).src"
+              :src="getDeviceImageState(selectedDevice).src || ''"
+              :alt="selectedDevice.name"
+            />
+            <div
+              v-else
+              class="device-detail-placeholder"
+              :class="{ 'is-loading': isImageLoading(getDeviceImageState(selectedDevice)) }"
+            >
+              <div v-if="isImageLoading(getDeviceImageState(selectedDevice))" class="image-skeleton"></div>
+              <div v-else class="image-fallback">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+                <span class="image-status">{{ imageStatusLabel(getDeviceImageState(selectedDevice)) }}</span>
+                <button
+                  v-if="isImageRetryable(getDeviceImageState(selectedDevice))"
+                  class="retry-btn"
+                  type="button"
+                  @click.stop="retryDeviceImage(selectedDevice)"
+                >
+                  {{ t.app.retry }}
+                </button>
+              </div>
+            </div>
           </div>
           
           <p><strong>{{ t.devices.typeLabel }}:</strong> {{ selectedDevice.type }}</p>
@@ -655,7 +865,34 @@ onBeforeUnmount(() => {
                 <img :src="pendingImagePreviewUrl" alt="Preview" />
               </div>
               <div v-else-if="isEditing && selectedDevice?.imageUrl && !pendingImageFile" class="ai-preview">
-                <img :src="getDeviceImageSrc(selectedDevice) || ''" :alt="selectedDevice.name" />
+                <img
+                  v-if="getDeviceImageState(selectedDevice).status === 'loaded' && getDeviceImageState(selectedDevice).src"
+                  :src="getDeviceImageState(selectedDevice).src || ''"
+                  :alt="selectedDevice.name"
+                />
+                <div
+                  v-else
+                  class="device-detail-placeholder"
+                  :class="{ 'is-loading': isImageLoading(getDeviceImageState(selectedDevice)) }"
+                >
+                  <div v-if="isImageLoading(getDeviceImageState(selectedDevice))" class="image-skeleton"></div>
+                  <div v-else class="image-fallback">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    <span class="image-status">{{ imageStatusLabel(getDeviceImageState(selectedDevice)) }}</span>
+                    <button
+                      v-if="isImageRetryable(getDeviceImageState(selectedDevice))"
+                      class="retry-btn"
+                      type="button"
+                      @click.stop="retryDeviceImage(selectedDevice)"
+                    >
+                      {{ t.app.retry }}
+                    </button>
+                  </div>
+                </div>
               </div>
               <button v-if="pendingImagePreviewUrl" class="ghost-btn" @click="clearPendingImage" type="button" style="margin-top: 8px;">Remove Image</button>
             </div>
@@ -1388,6 +1625,65 @@ onBeforeUnmount(() => {
   width: 32px;
   height: 32px;
   stroke-width: 1.5;
+}
+
+.device-detail-placeholder {
+  width: 100%;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--surface-2);
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border-default);
+}
+
+.image-skeleton {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-2);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06) 25%, rgba(255, 255, 255, 0.14) 50%, rgba(255, 255, 255, 0.06) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.image-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.image-fallback svg {
+  width: 32px;
+  height: 32px;
+  stroke-width: 1.5;
+}
+
+.image-status {
+  font-size: 12px;
+  text-align: center;
+}
+
+.retry-btn {
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.device-thumbnail-placeholder.is-loading,
+.device-detail-placeholder.is-loading {
+  padding: 0;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .device-detail-image {
