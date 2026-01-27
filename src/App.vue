@@ -2,10 +2,15 @@
 import { computed, watchEffect, watch } from 'vue'
 import { SignedIn, SignedOut, UserButton, OrganizationSwitcher, useAuth, useClerk } from '@clerk/vue'
 import { registerTokenGetter } from './lib/authToken'
+import { useAuthz } from './lib/authz'
+import { useEntitlements } from './lib/useEntitlements'
+import { quotaStore } from './stores/quota'
 import PatchBayGrid from './components/PatchBayGrid.vue'
 import DevicesManager from './components/DevicesManager.vue'
 import ConnectionFinder from './components/ConnectionFinder.vue'
 import AuthScreen from './components/AuthScreen.vue'
+import AuthDiagnosticsPanel from './components/AuthDiagnosticsPanel.vue'
+import AccessDisabledScreen from './components/AccessDisabledScreen.vue'
 import ToastHost from './ui/ToastHost.vue'
 import { strings } from './ui/strings'
 import { store } from './store'
@@ -14,6 +19,17 @@ import logoUrl from './assets/el-riche-mark.svg'
 const t = strings
 const { isLoaded, isSignedIn, getToken, orgId } = useAuth()
 const clerk = useClerk()
+const {
+  authContext,
+  authContextLoaded,
+  authContextLoading,
+  authContextError,
+  loadAuthContext,
+  resetAuthContext,
+} = useAuthz()
+const { hasAppAccess, canExport } = useEntitlements()
+const isDev = import.meta.env.DEV
+const showAuthDiagnostics = isDev && new URLSearchParams(window.location.search).has('authdiag')
 
 // orgLoaded se considera true cuando el usuario no está autenticado
 // o cuando Clerk está completamente cargado
@@ -31,15 +47,7 @@ watchEffect(() => {
     // getToken es un ComputedRef, necesitamos extraer su función
     const tokenFn = getToken.value
     if (tokenFn) {
-      const jwtTemplate = import.meta.env.VITE_CLERK_JWT_TEMPLATE
-      const audience = import.meta.env.VITE_CLERK_AUDIENCE
-      const wrappedTokenFn = (options?: { skipCache?: boolean }) => {
-        const tokenOptions: Record<string, unknown> = { ...(options || {}) }
-        if (jwtTemplate) tokenOptions.template = jwtTemplate
-        if (audience) tokenOptions.audience = audience
-        return tokenFn(tokenOptions as { skipCache?: boolean })
-      }
-      registerTokenGetter(wrappedTokenFn)
+      registerTokenGetter(tokenFn)
     }
   }
 })
@@ -50,12 +58,20 @@ watch([isSignedIn, orgId], ([newSignedIn, newOrgId], [oldSignedIn, oldOrgId]) =>
   if (oldSignedIn && !newSignedIn) {
     console.log('[App] User signed out, resetting store')
     store.resetState()
+    resetAuthContext()
+    quotaStore.reset()
   }
   
   // Si cambió la org, resetear para cargar datos de la nueva org
   if (newSignedIn && oldOrgId && newOrgId && oldOrgId !== newOrgId) {
     console.log('[App] Organization changed, resetting store')
     store.resetState()
+    resetAuthContext()
+    quotaStore.reset()
+  }
+
+  if (newSignedIn && newOrgId && (!oldSignedIn || oldOrgId !== newOrgId)) {
+    void loadAuthContext({ force: true }).catch(() => {})
   }
 })
 
@@ -69,14 +85,23 @@ watchEffect(() => {
   if (userSignedIn && hasOrg) {
     // Usuario autenticado con org activa
     // Solo cargar si no se han cargado datos aún y no hay error de auth
-    if (!store.hasLoadedInitialData && !store.loading && !store.authError) {
+    const authReady =
+      authContextLoaded.value ||
+      authContextError.value === 'AUTH_CONTEXT_UNSUPPORTED' ||
+      Boolean(authContextError.value)
+    if (authReady && hasAppAccess.value && !store.hasLoadedInitialData && !store.loading && !store.authError) {
       console.log('[App] Loading initial data...')
       store.loadData()
     }
+    void loadAuthContext().catch(() => {})
   } else if (userSignedIn && !hasOrg) {
     // Usuario autenticado pero sin org activa (la UI lo maneja)
   }
 })
+
+watch(() => authContext.value, (context) => {
+  quotaStore.updateFromAuthContext(context)
+}, { immediate: true })
 
 // Desloguear al usuario cuando hay error AUTH_EXPIRED
 watchEffect(() => {
@@ -93,6 +118,10 @@ const statusLabel = computed(() => {
   if (store.loading) return t.app.syncing
   if (store.error) return t.app.syncIssue
   return t.app.synced
+})
+
+const showAuthContextBanner = computed(() => {
+  return authContextError.value && authContextError.value !== 'AUTH_CONTEXT_UNSUPPORTED'
 })
 
 const notifyComingSoon = () => {
@@ -148,6 +177,10 @@ const notifyComingSoon = () => {
 
     <!-- Main App (only when org is active) -->
     <div v-else class="app-container">
+      <div v-if="showAuthContextBanner" class="auth-context-banner">
+        <strong>{{ t.app.syncIssue }}</strong>
+        <span>{{ authContextError }}</span>
+      </div>
       <div v-if="store.backendAuthDegraded" class="auth-degraded-banner">
         <div class="auth-degraded-text">
           <strong>{{ t.app.authDegradedTitle }}</strong>
@@ -155,65 +188,80 @@ const notifyComingSoon = () => {
         </div>
         <button class="ghost-btn" @click="store.retryInitialLoad()">{{ t.app.retry }}</button>
       </div>
-      <div v-if="store.loading" class="loading-overlay">
-        <div class="loading-card">{{ t.app.loadingData }}</div>
+      <div v-if="authContextLoading" class="loading-overlay">
+        <div class="loading-card">Loading access...</div>
       </div>
-
-      <header class="topbar">
-        <div class="brand">
-          <img class="brand-mark" :src="logoUrl" alt="" />
-          <div class="brand-text">
-            <span class="brand-title">{{ t.app.name }}</span>
-            <span class="brand-subtitle">{{ t.app.tagline }}</span>
-          </div>
+      <AccessDisabledScreen v-else-if="!hasAppAccess" />
+      <div v-else class="app-shell">
+        <div v-if="store.loading" class="loading-overlay">
+          <div class="loading-card">{{ t.app.loadingData }}</div>
         </div>
 
-        <div class="topbar-center">
-          <div class="status-chip" :class="{ loading: store.loading, error: store.error }">
-            <span class="status-dot"></span>
-            <span class="status-text">{{ statusLabel }}</span>
+        <header class="topbar">
+          <div class="brand">
+            <img class="brand-mark" :src="logoUrl" alt="" />
+            <div class="brand-text">
+              <span class="brand-title">{{ t.app.name }}</span>
+              <span class="brand-subtitle">{{ t.app.tagline }}</span>
+            </div>
           </div>
-          <div class="topbar-actions">
-            <button class="ghost-btn" @click="notifyComingSoon">{{ t.app.export }}</button>
-            <button class="ghost-btn" @click="notifyComingSoon">{{ t.app.help }}</button>
-            <button class="ghost-btn" @click="notifyComingSoon">{{ t.app.shortcuts }}</button>
+
+          <div class="topbar-center">
+            <div class="status-chip" :class="{ loading: store.loading, error: store.error }">
+              <span class="status-dot"></span>
+              <span class="status-text">{{ statusLabel }}</span>
+            </div>
+            <div class="topbar-actions">
+              <button
+                class="ghost-btn"
+                :disabled="!canExport"
+                :title="!canExport ? t.app.exportDisabled : ''"
+                @click="notifyComingSoon"
+              >
+                {{ t.app.export }}
+              </button>
+              <button class="ghost-btn" @click="notifyComingSoon">{{ t.app.help }}</button>
+              <button class="ghost-btn" @click="notifyComingSoon">{{ t.app.shortcuts }}</button>
+            </div>
           </div>
-        </div>
 
-        <div class="topbar-right">
-          <nav class="main-nav">
-            <button
-              :class="{ active: store.activeTab === 'patchbay' }"
-              @click="store.setTab('patchbay')"
-            >
-              {{ t.nav.patchbay }}
-            </button>
-            <button
-              :class="{ active: store.activeTab === 'devices' }"
-              @click="store.setTab('devices')"
-            >
-              {{ t.nav.devices }}
-            </button>
-            <button
-              :class="{ active: store.activeTab === 'connections' }"
-              @click="store.setTab('connections')"
-            >
-              {{ t.nav.connections }}
-            </button>
-          </nav>
-          <div class="user-menu">
-            <UserButton />
+          <div class="topbar-right">
+            <nav class="main-nav">
+              <button
+                :class="{ active: store.activeTab === 'patchbay' }"
+                @click="store.setTab('patchbay')"
+              >
+                {{ t.nav.patchbay }}
+              </button>
+              <button
+                :class="{ active: store.activeTab === 'devices' }"
+                @click="store.setTab('devices')"
+              >
+                {{ t.nav.devices }}
+              </button>
+              <button
+                :class="{ active: store.activeTab === 'connections' }"
+                @click="store.setTab('connections')"
+              >
+                {{ t.nav.connections }}
+              </button>
+            </nav>
+            <div class="user-menu">
+              <UserButton />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main class="content-area">
-        <PatchBayGrid v-if="store.activeTab === 'patchbay'" />
-        <DevicesManager v-if="store.activeTab === 'devices'" />
-        <ConnectionFinder v-if="store.activeTab === 'connections'" />
-      </main>
+        <main class="content-area">
+          <PatchBayGrid v-if="store.activeTab === 'patchbay'" />
+          <DevicesManager v-if="store.activeTab === 'devices'" />
+          <ConnectionFinder v-if="store.activeTab === 'connections'" />
+        </main>
 
-      <ToastHost />
+        <AuthDiagnosticsPanel v-if="showAuthDiagnostics" />
+
+        <ToastHost />
+      </div>
     </div>
   </SignedIn>
 </template>
@@ -300,6 +348,25 @@ const notifyComingSoon = () => {
   flex-direction: column;
   height: 100vh;
   animation: fade-in 0.6s ease-out;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.auth-context-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(212, 154, 79, 0.12);
+  border-bottom: 1px solid rgba(212, 154, 79, 0.35);
+  color: var(--text-primary);
+  font-size: 0.9rem;
 }
 
 .auth-degraded-banner {
@@ -435,6 +502,13 @@ const notifyComingSoon = () => {
 .ghost-btn:hover {
   border-color: var(--accent);
   color: var(--text-primary);
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
 }
 
 .main-nav {

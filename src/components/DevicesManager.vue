@@ -2,6 +2,9 @@
 import { ref, computed, watch, watchEffect, onBeforeUnmount, onMounted, type ComponentPublicInstance, type VNodeRef } from 'vue'
 import { useAuth } from '@clerk/vue'
 import { api } from '../lib/api'
+import { useEntitlements } from '@/lib/useEntitlements'
+import { guardAiDetection } from '@/lib/aiDetectionGuard'
+import { quotaStore } from '@/stores/quota'
 import { store, type Device, type DevicePort } from '../store'
 import { strings } from '../ui/strings'
 import ConfirmDialog from '../ui/ConfirmDialog.vue'
@@ -14,6 +17,33 @@ const deviceImages = useDeviceImages()
 const searchQuery = ref('')
 const isLoading = ref(false)
 const isDesktop = ref(window.innerWidth >= 1024)
+const { canUseAiDetection, aiMonthlyLimit } = useEntitlements()
+
+const isAiQuotaExceeded = computed(() => {
+  return quotaStore.aiDetectionRemaining !== null && quotaStore.aiDetectionRemaining <= 0
+})
+
+const aiQuotaLabel = computed(() => {
+  const limit = aiMonthlyLimit.value
+  if (!limit) return null
+  if (quotaStore.aiDetectionUsedToday !== null) {
+    return t.devices.aiQuotaUsed(quotaStore.aiDetectionUsedToday, limit)
+  }
+  if (quotaStore.aiDetectionRemaining !== null) {
+    return t.devices.aiQuotaRemaining(quotaStore.aiDetectionRemaining, limit)
+  }
+  return t.devices.aiQuotaLimit(limit)
+})
+
+const aiUploadDisabled = computed(() => {
+  return !canUseAiDetection.value || isAiQuotaExceeded.value
+})
+
+const aiUploadDisabledReason = computed(() => {
+  if (!canUseAiDetection.value) return t.devices.aiNotIncluded
+  if (isAiQuotaExceeded.value) return strings.toast.quotaExceeded
+  return ''
+})
 
 const updateViewport = () => {
   isDesktop.value = window.innerWidth >= 1024
@@ -118,6 +148,12 @@ const aiPreviewUrl = ref<string | null>(null)
 const aiLoading = ref(false)
 const aiStatusMessage = ref<string | null>(null)
 const isEditing = computed(() => editingDeviceId.value !== null)
+
+watch(canUseAiDetection, (allowed) => {
+  if (!allowed && addDeviceMode.value === 'ai') {
+    addDeviceMode.value = 'manual'
+  }
+})
 
 // Image upload state
 const pendingImageFile = ref<File | null>(null)
@@ -374,6 +410,14 @@ const handleAiFileChange = async (event: Event) => {
   input.value = ''
   if (!file) return
 
+  const allowed = guardAiDetection({
+    enabled: canUseAiDetection.value,
+    remaining: quotaStore.aiDetectionRemaining,
+    onEntitlement: () => showError(t.devices.aiNotIncluded),
+    onQuota: () => showError(strings.toast.quotaExceeded),
+  })
+  if (!allowed) return
+
   setAiImageFile(file)
   // Also set as pending image for auto-attach
   setPendingImageFile(file)
@@ -381,7 +425,11 @@ const handleAiFileChange = async (event: Event) => {
   aiLoading.value = true
 
   try {
-    const device = await api.parseDeviceFromImage(file)
+    const { device, headers } = await api.parseDeviceFromImageWithMeta(file)
+    const quotaUpdated = quotaStore.updateFromQuotaHeaders(headers)
+    if (!quotaUpdated) {
+      quotaStore.recordAiDetectionSuccess()
+    }
     newDevice.value = {
       name: device.name || '',
       type: normalizeDeviceType(device.type),
@@ -393,7 +441,15 @@ const handleAiFileChange = async (event: Event) => {
     }))
     aiStatusMessage.value = t.devices.aiDraftReady
   } catch (err: any) {
-    showError(err.message || strings.toast.imageParseFailed)
+    if (err?.message === 'ENTITLEMENT_REQUIRED') {
+      showError(strings.toast.entitlementRequired)
+    } else if (err?.message === 'QUOTA_EXCEEDED' || err?.message === 'LIMIT_REACHED') {
+      showError(strings.toast.quotaExceeded)
+    } else if (err?.message === 'PAYMENT_REQUIRED') {
+      showError(strings.toast.paymentRequired)
+    } else {
+      showError(err.message || strings.toast.imageParseFailed)
+    }
     console.error('Error parsing device image:', err)
   } finally {
     aiLoading.value = false
@@ -828,7 +884,9 @@ onBeforeUnmount(() => {
           </button>
           <button
             class="tab-btn"
-            :class="{ active: addDeviceMode === 'ai' }"
+            :class="{ active: addDeviceMode === 'ai', disabled: !canUseAiDetection }"
+            :disabled="!canUseAiDetection"
+            :title="!canUseAiDetection ? t.devices.aiNotIncluded : ''"
             @click="addDeviceMode = 'ai'"
           >
             {{ t.devices.tabAutoDetect }}
@@ -925,7 +983,7 @@ onBeforeUnmount(() => {
               <span :class="{ active: aiStep === 'review' }">{{ t.devices.aiSteps.review }}</span>
             </div>
             <p class="ai-help">{{ t.devices.aiHelp }}</p>
-            <label class="ai-upload-btn">
+            <label class="ai-upload-btn" :class="{ disabled: aiUploadDisabled }" :title="aiUploadDisabledReason">
               {{ t.devices.aiUpload }}
               <input
                 class="ai-file-input"
@@ -933,8 +991,10 @@ onBeforeUnmount(() => {
                 accept="image/*"
                 capture="environment"
                 @change="handleAiFileChange"
+                :disabled="aiUploadDisabled"
               />
             </label>
+            <p v-if="aiQuotaLabel" class="ai-quota">{{ aiQuotaLabel }}</p>
             <div v-if="aiPreviewUrl" class="ai-preview">
               <img :src="aiPreviewUrl" alt="Device preview" />
               <p class="help-text">This image will be attached to the device when you save.</p>
@@ -1320,6 +1380,11 @@ onBeforeUnmount(() => {
   border-color: var(--accent);
 }
 
+.tab-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .form-footer {
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border-default);
@@ -1442,8 +1507,21 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.ai-upload-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  border-color: var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
 .ai-file-input {
   display: none;
+}
+
+.ai-quota {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 0.85rem;
 }
 
 .ai-preview {

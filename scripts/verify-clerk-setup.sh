@@ -39,13 +39,14 @@ else
     echo "✅ VITE_CLERK_PUBLISHABLE_KEY configurada ($ENV_TYPE)"
 fi
 
-# Check for API URL
-if [ -z "$VITE_API_URL" ]; then
-    echo "⚠️  VITE_API_URL no configurada"
+# Check for API URL (prefer VITE_API_BASE_URL)
+if [ -z "$VITE_API_BASE_URL" ] && [ -z "$VITE_API_URL" ]; then
+    echo "⚠️  VITE_API_BASE_URL/VITE_API_URL no configurada"
     echo "   → Se usará http://localhost:8088 por defecto"
-    VITE_API_URL="http://localhost:8088"
+    API_BASE_URL="http://localhost:8088"
 else
-    echo "✅ VITE_API_URL configurada: $VITE_API_URL"
+    API_BASE_URL="${VITE_API_BASE_URL:-$VITE_API_URL}"
+    echo "✅ API base configurada: $API_BASE_URL"
 fi
 
 # Check for optional token contract settings
@@ -80,12 +81,12 @@ echo ""
 echo "🔌 Verificando conectividad con backend..."
 
 if command -v curl &> /dev/null; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$VITE_API_URL/health" 2>/dev/null || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API_BASE_URL/health" 2>/dev/null || echo "000")
     
     if [ "$HTTP_CODE" = "200" ]; then
-        echo "✅ Backend respondiendo en $VITE_API_URL"
+        echo "✅ Backend respondiendo en $API_BASE_URL"
     elif [ "$HTTP_CODE" = "000" ]; then
-        echo "⚠️  Backend no responde en $VITE_API_URL"
+        echo "⚠️  Backend no responde en $API_BASE_URL"
         echo "   → ¿Está corriendo el backend?"
         echo "   → Verificá que la URL sea correcta"
     else

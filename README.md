@@ -63,7 +63,9 @@ Editar `.env`:
 
 ```env
 # Backend API URL
-VITE_API_URL=http://localhost:8088
+# (prefer VITE_API_BASE_URL; VITE_API_URL still supported)
+VITE_API_BASE_URL=http://localhost:8088
+# VITE_API_URL=http://localhost:8088
 
 # Clerk Publishable Key (REQUERIDO)
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_tu_key_aqui
@@ -105,7 +107,10 @@ pepper/
 │   │   └── ConnectionFinder.vue    # Búsqueda de conexiones
 │   ├── lib/
 │   │   ├── api.ts                  # Cliente HTTP (Bearer token)
-│   │   └── authToken.ts            # Provider de tokens para API
+│   │   ├── apiClient.ts            # Wrapper fetch + auth headers
+│   │   ├── authConfig.ts           # Config centralizada de auth/env
+│   │   ├── authToken.ts            # Provider de tokens para API
+│   │   └── authz.ts                # Auth context / features
 │   ├── store/
 │   │   └── index.ts                # Estado global + API calls
 │   ├── ui/
@@ -251,7 +256,7 @@ vercel
 
 # Configurar env vars en Vercel dashboard:
 # - VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
-# - VITE_API_URL=https://api.tu-dominio.com
+# - VITE_API_BASE_URL=https://api.tu-dominio.com
 # - VITE_CLERK_JWT_TEMPLATE=backend_api (opcional)
 # - VITE_CLERK_AUDIENCE=https://api.tu-dominio.com (opcional)
 ```

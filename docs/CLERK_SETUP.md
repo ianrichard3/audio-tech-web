@@ -51,9 +51,9 @@ El backend requiere **sí o sí**:
    VITE_CLERK_PUBLISHABLE_KEY=pk_test_tu_key_aquí
    ```
 
-### 1.5 (Opcional) JWT Template / Audience
+### 1.5 JWT Template / Audience (recomendado / requerido si el backend usa entitlements)
 
-Si el backend valida `aud` o necesita claims custom, configurá un JWT template en Clerk y pasá su nombre al frontend:
+Si el backend valida `aud` o necesita claims custom (plan/role/features/limits), configurá un JWT template en Clerk y pasá su nombre al frontend:
 
 ```
 VITE_CLERK_JWT_TEMPLATE=backend_api
@@ -66,6 +66,8 @@ VITE_CLERK_AUDIENCE=https://api.tupatchbay.com
 ```
 
 > Tip: Si el backend vuelve obligatorio `aud`, necesitás que el frontend pida tokens con template/audience compatible.
+> 
+> Debug rápido: en dev podés abrir `/?authdiag=1` para ver el resumen de config de auth en pantalla (incluye template/audience activos).
 
 ## Fase 2: Crear Usuario y Organización de Prueba
 

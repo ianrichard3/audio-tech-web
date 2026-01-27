@@ -126,27 +126,27 @@ export function registerTokenGetter(getter: GetTokenFn): void {
   tokenGetter = getter
 }
 
-export async function getAuthToken(options?: { skipCache?: boolean }) {
+export async function getApiToken(options?: { skipCache?: boolean }) {
   if (!tokenGetter) return null
   return await tokenGetter(options)
 }
 ```
 
 **¿Por qué?**
-- `api.ts` no puede usar `useAuth()` (no es un componente Vue)
+- `apiClient.ts` no puede usar `useAuth()` (no es un componente Vue)
 - Evita pasar tokens manualmente por toda la app
 - Permite "refresh" del token con `skipCache: true`
 
-### 4. `lib/api.ts` - HTTP Client
+### 4. `lib/apiClient.ts` + `lib/api.ts` - HTTP Client
 
-**Responsabilidad**: Todas las llamadas HTTP al backend.
+**Responsabilidad**: Todas las llamadas HTTP al backend pasan por un wrapper con auth.
 
 **Features**:
 
 #### 4.1 Inyección automática de token
 
 ```typescript
-const token = await getAuthToken({ skipCache: isRetry })
+const token = await getApiToken({ skipCache: isRetry })
 if (token) {
   headers['Authorization'] = `Bearer ${token}`
 }

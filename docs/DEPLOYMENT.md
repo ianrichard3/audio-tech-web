@@ -14,8 +14,9 @@ Configurar en tu plataforma de hosting (Vercel, Netlify, etc.):
 # REQUERIDO - Clerk Production Key
 VITE_CLERK_PUBLISHABLE_KEY=pk_live_XXXXXXXXXXXXXXXXXX
 
-# REQUERIDO - URL del backend de producción
-VITE_API_URL=https://api.tupatchbay.com
+# REQUERIDO - URL del backend de producción (prefer VITE_API_BASE_URL)
+VITE_API_BASE_URL=https://api.tupatchbay.com
+# VITE_API_URL=https://api.tupatchbay.com
 
 # OPCIONAL - JWT template (si backend exige template/aud estrictos)
 VITE_CLERK_JWT_TEMPLATE=backend_api
@@ -168,7 +169,7 @@ rm -rf dist/
 
 # Configurar env vars de producción (temporal)
 export VITE_CLERK_PUBLISHABLE_KEY=pk_live_XXXXXXX
-export VITE_API_URL=https://api.tupatchbay.com
+export VITE_API_BASE_URL=https://api.tupatchbay.com
 
 # Build
 npm run build
@@ -206,14 +207,14 @@ vercel
 vercel env add VITE_CLERK_PUBLISHABLE_KEY production
 # Pegar: pk_live_XXXXXXX
 
-vercel env add VITE_API_URL production
+vercel env add VITE_API_BASE_URL production
 # Pegar: https://api.tupatchbay.com
 ```
 
 O desde el dashboard de Vercel:
 1. Ir a tu proyecto → Settings → Environment Variables
 2. Agregar `VITE_CLERK_PUBLISHABLE_KEY` = `pk_live_...`
-3. Agregar `VITE_API_URL` = URL del backend
+3. Agregar `VITE_API_BASE_URL` = URL del backend
 
 **Deploy**:
 ```bash
@@ -522,7 +523,7 @@ Primera semana después del launch:
 **Checklist**:
 1. ¿Backend permite origin del frontend?
 2. ¿`Authorization` header está en allowed headers?
-3. ¿URL del backend en `VITE_API_URL` es correcta (HTTPS)?
+3. ¿URL del backend en `VITE_API_BASE_URL` es correcta (HTTPS)?
 
 ### "Token validation fails"
 
