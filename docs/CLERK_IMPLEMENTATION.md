@@ -19,14 +19,14 @@
 **Archivo nuevo:** `src/lib/authToken.ts`
 - Módulo centralizado para acceso al token
 - Función `registerTokenGetter()` para conectar Clerk con la API
-- Función `getAuthToken()` que la capa API usa para obtener tokens
+- Función `getApiToken()` que la capa API usa para obtener tokens
 
 ### 5. Capa de API actualizada
-**Archivo modificado:** `src/lib/api.ts`
-- Importa `getAuthToken` desde authToken.ts
-- Inyecta header `Authorization: Bearer <token>` en todas las requests
-- Implementa retry automático en caso de 401 (token expirado)
-- Lanza errores específicos para AUTH_EXPIRED y AUTH_FORBIDDEN
+**Archivo modificado:** `src/lib/apiClient.ts` y `src/lib/api.ts`
+- Wrapper único de fetch con `Authorization: Bearer <token>` en todas las requests
+- `X-Request-Id` para trazabilidad sin exponer tokens
+- Retry automático en caso de 401 (token expirado)
+- Errores específicos para AUTH_EXPIRED, AUTH_FORBIDDEN y ORG_REQUIRED
 
 ### 6. Store actualizado
 **Archivo modificado:** `src/store/index.ts`

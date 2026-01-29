@@ -58,6 +58,13 @@ Guía completa de toda la documentación disponible para el proyecto.
      - Seguridad y buenas prácticas
      - Debugging tips
 
+5. **[AUTH_FRONTEND_CHECKLIST.md](./AUTH_FRONTEND_CHECKLIST.md)** - Checklist Frontend Auth
+   - ⏱️ Tiempo estimado: 10-15 minutos
+   - **Contenido**:
+     - Inventario de puntos de integración con auth
+     - Smoke testing rápido (auth_strict ON/OFF)
+     - Notas de rollout
+
 ---
 
 ## 🧪 Testing y QA

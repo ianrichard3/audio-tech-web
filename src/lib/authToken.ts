@@ -1,7 +1,8 @@
 // Token provider para conectar Clerk con la capa de API
 // Este módulo permite que api.ts acceda al token sin depender directamente de useAuth()
+import { buildClerkTokenOptions } from './authConfig'
 
-type GetTokenFn = (options?: { skipCache?: boolean }) => Promise<string | null>
+type GetTokenFn = (options?: { skipCache?: boolean; template?: string; audience?: string }) => Promise<string | null>
 
 let tokenGetter: GetTokenFn | null = null
 let refreshPromise: Promise<string | null> | null = null
@@ -21,7 +22,7 @@ async function getTokenDirect(options?: { skipCache?: boolean }): Promise<string
     console.error('[authToken] Token getter not registered. Did you call registerTokenGetter in App.vue?')
     return null
   }
-  return tokenGetter(options)
+  return tokenGetter(buildClerkTokenOptions(options))
 }
 
 /**
@@ -29,7 +30,7 @@ async function getTokenDirect(options?: { skipCache?: boolean }): Promise<string
  * @param skipCache - Si true, fuerza refresh del token (útil para reintentos 401)
  * @returns El token JWT o null si no hay sesión
  */
-export async function getAuthToken(options?: { skipCache?: boolean }): Promise<string | null> {
+export async function getApiToken(options?: { skipCache?: boolean }): Promise<string | null> {
   try {
     const wantsRefresh = !!options?.skipCache
 

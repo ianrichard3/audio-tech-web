@@ -1,37 +1,6 @@
 // API client for patchbay backend
-import { getAuthToken } from './authToken'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8088'
-const REQUEST_TIMEOUT_MS = 20000
-
-function isOrgRequiredError(message: string): boolean {
-  const normalized = message.toLowerCase()
-  return (
-    normalized.includes('active organization required') ||
-    normalized.includes('organization required') ||
-    normalized.includes('org required')
-  )
-}
-
-async function readErrorBody(response: Response): Promise<{ text: string; json: any | null }> {
-  const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) {
-    try {
-      const json = await response.json()
-      const text = typeof json?.detail === 'string' ? json.detail : JSON.stringify(json)
-      return { text, json }
-    } catch {
-      return { text: '', json: null }
-    }
-  }
-
-  try {
-    const text = await response.text()
-    return { text, json: null }
-  } catch {
-    return { text: '', json: null }
-  }
-}
+import { apiBaseUrl } from './authConfig'
+import { fetchWithAuth, requestJson, requestJsonWithMeta } from './apiClient'
 
 // API Types (snake_case from backend)
 export interface ApiPatchbayPoint {
@@ -91,6 +60,18 @@ export interface ApiDeviceUpdate {
   }>
 }
 
+export interface AuthContextResponse {
+  user_id?: string
+  org_id?: string | null
+  role?: string | null
+  enabled?: boolean
+  plan?: string | null
+  features?: Record<string, boolean>
+  limits?: Record<string, number>
+  usage?: Record<string, { feature_key: string; period: number; used: number; limit?: number | null }>
+  [key: string]: unknown
+}
+
 export type FetchImageResult =
   | { status: 'ok'; blobUrl: string }
   | { status: 'not_found' }
@@ -102,145 +83,74 @@ export type FetchImageResult =
 
 export type FetchImageFn = (imageUrl: string, options?: { signal?: AbortSignal; timeoutMs?: number }) => Promise<FetchImageResult>
 
-// HTTP client
-async function request<T>(path: string, options?: RequestInit, isRetry = false): Promise<T> {
-  const url = `${API_URL}${path}`
-  const body = options?.body
-  const headers: Record<string, string> = {
-    ...(options?.headers as Record<string, string>),
-  }
-  
-  // Inject Authorization token if available
-  const token = await getAuthToken({ skipCache: isRetry })
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  
-  try {
-    const controller = new AbortController()
-    if (options?.signal) {
-      options.signal.addEventListener('abort', () => controller.abort(), { once: true })
-    }
-    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-    let response: Response
-    try {
-      response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-          ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-          ...headers,
-        },
-      })
-    } finally {
-      window.clearTimeout(timeoutId)
-    }
-
-    if (!response.ok) {
-      // Handle 401: retry once with fresh token
-      if (response.status === 401 && !isRetry && token) {
-        console.warn('[API] Got 401, retrying with fresh token...')
-        return request<T>(path, options, true)
-      }
-      
-      const { text: errorText, json: errorJson } = await readErrorBody(response)
-      
-      // Throw specific error for auth issues
-      if (response.status === 401) {
-        throw new Error('AUTH_EXPIRED')
-      }
-      if (response.status === 403) {
-        const detailText =
-          typeof errorJson?.detail === 'string' ? errorJson.detail : errorText || ''
-        if (isOrgRequiredError(detailText)) {
-          throw new Error('ORG_REQUIRED')
-        }
-        throw new Error('AUTH_FORBIDDEN')
-      }
-      if (response.status === 503) {
-        throw new Error('AUTH_SERVICE_UNAVAILABLE')
-      }
-      if (response.status === 502 || response.status === 504) {
-        throw new Error('UPSTREAM_UNAVAILABLE')
-      }
-      
-      const error = new Error(`HTTP ${response.status}: ${errorText}`)
-      ;(error as any).status = response.status
-      throw error
-    }
-
-    return await response.json()
-  } catch (error: any) {
-    if (error?.name === 'AbortError') {
-      console.error(`API request timed out: ${path}`)
-      throw new Error('NETWORK_TIMEOUT')
-    }
-    console.error(`API request failed: ${path}`, error)
-    throw error
-  }
-}
-
 // API methods
 export const api = {
   async getState(): Promise<ApiState> {
-    return request<ApiState>('/state')
+    return requestJson<ApiState>('/state')
   },
 
   async createDevice(payload: ApiDeviceCreate): Promise<ApiDevice> {
-    return request<ApiDevice>('/devices', {
+    return requestJson<ApiDevice>('/devices', {
       method: 'POST',
       body: JSON.stringify(payload),
     })
   },
 
   async deleteDevice(deviceId: number): Promise<ApiDevice> {
-    return request<ApiDevice>(`/devices/${deviceId}`, {
+    return requestJson<ApiDevice>(`/devices/${deviceId}`, {
       method: 'DELETE',
     })
   },
 
   async updateDevice(deviceId: number, payload: ApiDeviceUpdate): Promise<ApiDevice> {
-    return request<ApiDevice>(`/devices/${deviceId}`, {
+    return requestJson<ApiDevice>(`/devices/${deviceId}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
   },
 
   async linkPort(portId: string, patchbayId: number): Promise<ApiPortLinkResponse> {
-    return request<ApiPortLinkResponse>(`/ports/${portId}/link`, {
+    return requestJson<ApiPortLinkResponse>(`/ports/${portId}/link`, {
       method: 'POST',
       body: JSON.stringify({ patchbay_id: patchbayId }),
     })
   },
 
   async updatePortPatchbay(portId: string, patchbayId: number | null): Promise<ApiPort> {
-    return request<ApiPort>(`/ports/${portId}/patchbay`, {
+    return requestJson<ApiPort>(`/ports/${portId}/patchbay`, {
       method: 'PUT',
       body: JSON.stringify({ patchbay_id: patchbayId }),
     })
   },
 
   async unlinkPort(portId: string): Promise<ApiPort> {
-    return request<ApiPort>(`/ports/${portId}/unlink`, {
+    return requestJson<ApiPort>(`/ports/${portId}/unlink`, {
       method: 'POST',
     })
   },
 
   async parseDeviceFromImage(image: File): Promise<ApiDevice> {
+    const { device } = await this.parseDeviceFromImageWithMeta(image)
+    return device
+  },
+
+  async parseDeviceFromImageWithMeta(image: File): Promise<{ device: ApiDevice; headers: Headers }> {
     const formData = new FormData()
     formData.append('image', image)
 
     try {
-      return await request<ApiDevice>('/devices/parse-image', {
+      const { data, headers } = await requestJsonWithMeta<AIDeviceExtraction>('/ai/parse-image', {
         method: 'POST',
         body: formData,
       })
+      return { device: buildDeviceFromExtraction(data), headers }
     } catch (err: any) {
       if (err?.status === 404 || String(err?.message || '').includes('HTTP 404')) {
-        return request<ApiDevice>('/ai/parse-image', {
+        const { data, headers } = await requestJsonWithMeta<ApiDevice>('/devices/parse-image', {
           method: 'POST',
           body: formData,
         })
+        return { device: data, headers }
       }
       throw err
     }
@@ -259,7 +169,7 @@ export const api = {
     const formData = new FormData()
     formData.append('image', image)
 
-    return request<ApiDevice>(`/devices/${deviceId}/image`, {
+    return requestJson<ApiDevice>(`/devices/${deviceId}/image`, {
       method: 'POST',
       body: formData,
     })
@@ -269,15 +179,19 @@ export const api = {
     if (relativeOrAbsolute.startsWith('http://') || relativeOrAbsolute.startsWith('https://')) {
       return relativeOrAbsolute
     }
-    return `${API_URL}${relativeOrAbsolute}`
+    return `${apiBaseUrl}${relativeOrAbsolute}`
   },
 
   getDeviceImageSrc(imageUrl: string | null | undefined, imageUpdatedAt: string | null | undefined): string | null {
     if (!imageUrl) return null
-    
+
     const base = this.buildAbsoluteUrl(imageUrl)
     const cacheBust = imageUpdatedAt ? `?v=${encodeURIComponent(imageUpdatedAt)}` : ''
     return base + cacheBust
+  },
+
+  async getAuthContext(): Promise<AuthContextResponse> {
+    return requestJson<AuthContextResponse>('/me/entitlements')
   },
 
   // Fetch image with authentication and return blob URL
@@ -293,20 +207,18 @@ export const api = {
       options.signal.addEventListener('abort', () => controller.abort(), { once: true })
     }
 
-    const doFetch = async (token?: string | null) => {
-      return fetch(url, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    const doFetch = async (isRetry?: boolean) => {
+      return fetchWithAuth(url, {
         signal: controller.signal,
-      })
+      }, isRetry)
     }
 
     try {
-      const token = await getAuthToken()
-      let response = await doFetch(token)
+      let { response } = await doFetch()
 
       if (response.status === 401) {
-        const freshToken = await getAuthToken({ skipCache: true })
-        response = await doFetch(freshToken)
+        const retry = await doFetch(true)
+        response = retry.response
       }
 
       if (response.status === 404) return { status: 'not_found' }
@@ -325,4 +237,46 @@ export const api = {
       clearTimeout(timeoutId)
     }
   },
+}
+
+interface AIDeviceExtraction {
+  device: {
+    brand?: string | null
+    model?: string | null
+    category?: string | null
+  }
+  ports: Array<{
+    label: string
+    direction?: string | null
+  }>
+}
+
+function buildDeviceFromExtraction(extraction: AIDeviceExtraction): ApiDevice {
+  const brand = (extraction.device?.brand || '').trim()
+  const model = (extraction.device?.model || '').trim()
+  const name = brand && model ? `${brand} ${model}` : (brand || model || 'Unknown device')
+  const type = extraction.device?.category || 'Other'
+
+  const ports: ApiPort[] = extraction.ports.map((port, index) => ({
+    id: `ai-dev-0-port-${index + 1}`,
+    label: port.label,
+    type: mapAIPortDirection(port.direction),
+    patchbay_id: null,
+  }))
+
+  return {
+    id: 0,
+    name,
+    type,
+    ports,
+    image_url: null,
+    image_updated_at: null,
+  }
+}
+
+function mapAIPortDirection(direction?: string | null): 'Input' | 'Output' | 'Other' {
+  const value = (direction || '').toLowerCase()
+  if (value === 'input') return 'Input'
+  if (value === 'output') return 'Output'
+  return 'Other'
 }

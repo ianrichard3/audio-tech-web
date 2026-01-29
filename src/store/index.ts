@@ -143,10 +143,22 @@ export const store = reactive({
         } else if (err.message === 'AUTH_FORBIDDEN') {
           this.error = strings.toast.noPermission
           this.pushToast({ type: 'error', message: this.error })
+        } else if (err.message === 'ENTITLEMENT_REQUIRED') {
+          this.error = strings.toast.entitlementRequired
+          this.pushToast({ type: 'error', message: this.error })
         } else if (err.message === 'AUTH_SERVICE_UNAVAILABLE') {
           this.error = strings.toast.authServiceUnavailable
           this.backendAuthDegraded = true
           console.warn('[Store] Auth service unavailable - keeping session active')
+        } else if (err.message === 'QUOTA_EXCEEDED') {
+          this.error = strings.toast.quotaExceeded
+          this.pushToast({ type: 'error', message: this.error })
+        } else if (err.message === 'LIMIT_REACHED') {
+          this.error = strings.toast.limitReached
+          this.pushToast({ type: 'error', message: this.error })
+        } else if (err.message === 'PAYMENT_REQUIRED') {
+          this.error = strings.toast.paymentRequired
+          this.pushToast({ type: 'error', message: this.error })
         } else if (err.message === 'NETWORK_TIMEOUT') {
           this.error = strings.toast.networkTimeout
           this.pushToast({ type: 'error', message: this.error })
@@ -178,6 +190,22 @@ export const store = reactive({
     if (err?.message === 'AUTH_SERVICE_UNAVAILABLE') {
       this.backendAuthDegraded = true
       this.pushToast({ type: 'error', message: strings.toast.authServiceUnavailable })
+      return true
+    }
+    if (err?.message === 'ENTITLEMENT_REQUIRED') {
+      this.pushToast({ type: 'error', message: strings.toast.entitlementRequired })
+      return true
+    }
+    if (err?.message === 'QUOTA_EXCEEDED') {
+      this.pushToast({ type: 'error', message: strings.toast.quotaExceeded })
+      return true
+    }
+    if (err?.message === 'LIMIT_REACHED') {
+      this.pushToast({ type: 'error', message: strings.toast.limitReached })
+      return true
+    }
+    if (err?.message === 'PAYMENT_REQUIRED') {
+      this.pushToast({ type: 'error', message: strings.toast.paymentRequired })
       return true
     }
     if (err?.message === 'NETWORK_TIMEOUT') {
