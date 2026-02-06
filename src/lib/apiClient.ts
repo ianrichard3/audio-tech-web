@@ -177,6 +177,74 @@ export async function requestJson<T>(path: string, options?: RequestInit, isRetr
   }
 }
 
+export async function requestJsonAllowErrors<T>(
+  path: string,
+  options?: RequestInit,
+  allowedStatuses: number[] = [],
+  isRetry = false
+): Promise<{ data: T | null; status: number; errorJson: any | null; errorText: string; headers: Headers }>
+{
+  const url = `${apiBaseUrl}${path}`
+  const body = options?.body
+  const requestId = generateRequestId()
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string>),
+    'X-Request-Id': requestId,
+  }
+
+  const token = await getApiToken({ skipCache: isRetry })
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  try {
+    const controller = new AbortController()
+    if (options?.signal) {
+      options.signal.addEventListener('abort', () => controller.abort(), { once: true })
+    }
+    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: withContentType(headers, body),
+      })
+    } finally {
+      window.clearTimeout(timeoutId)
+    }
+
+    if (!response.ok) {
+      if (response.status === 401 && !isRetry && token) {
+        console.warn(`[API] Got 401 for ${path}, retrying with fresh token...`, { requestId })
+        return requestJsonAllowErrors<T>(path, options, allowedStatuses, true)
+      }
+
+      const { text: errorText, json: errorJson } = await readErrorBody(response)
+      if (allowedStatuses.includes(response.status)) {
+        return {
+          data: null,
+          status: response.status,
+          errorJson,
+          errorText,
+          headers: response.headers,
+        }
+      }
+      throw createApiErrorFromResponse(response, errorText, errorJson, requestId)
+    }
+
+    const data = await response.json()
+    return { data, status: response.status, errorJson: null, errorText: '', headers: response.headers }
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      console.error(`API request timed out: ${path}`, { requestId })
+      throw new Error('NETWORK_TIMEOUT')
+    }
+    console.error(`API request failed: ${path}`, { requestId, error })
+    throw error
+  }
+}
+
 export async function requestJsonWithMeta<T>(
   path: string,
   options?: RequestInit,
