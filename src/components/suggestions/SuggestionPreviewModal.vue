@@ -81,7 +81,7 @@ const touchedLabel = (patchId: number) => patchLabel(patchId)
         <div v-if="conflictDetails.conflicts.length" class="list">
           <strong>{{ t.suggestions.conflictsTitle }}</strong>
           <ul>
-            <li v-for="(item, idx) in conflictDetails.conflicts" :key="idx">
+            <li v-for="(_item, idx) in conflictDetails.conflicts" :key="idx">
               {{ t.suggestions.conflictItem(idx + 1) }}
             </li>
           </ul>
