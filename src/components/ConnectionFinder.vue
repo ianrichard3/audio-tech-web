@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { store, type Device, type DevicePort } from '../store'
+import SuggestionsPanel from './suggestions/SuggestionsPanel.vue'
 import { strings } from '../ui/strings'
 
 const t = strings
@@ -262,6 +263,7 @@ const copyInstruction = async () => {
     </div>
 
     <div class="finder-body">
+      <SuggestionsPanel />
       <div class="selectors-container">
         <div class="selector-box">
           <label class="selector-label">

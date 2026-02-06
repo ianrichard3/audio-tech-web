@@ -1,6 +1,18 @@
 // API client for patchbay backend
 import { apiBaseUrl } from './authConfig'
-import { fetchWithAuth, requestJson, requestJsonWithMeta } from './apiClient'
+import { fetchWithAuth, requestJson, requestJsonAllowErrors, requestJsonWithMeta } from './apiClient'
+import {
+  type SuggestionOptions,
+  type Intent,
+  type SuggestionsResponse,
+  type PreviewResponse,
+  type ApplyResponse,
+  type SuggestionPlan,
+  IntentParseError,
+  ConflictError,
+  type IntentParseErrorData,
+  type ConflictErrorData,
+} from '@/types/suggestions'
 
 // API Types (snake_case from backend)
 export interface ApiPatchbayPoint {
@@ -236,6 +248,85 @@ export const api = {
     } finally {
       clearTimeout(timeoutId)
     }
+  },
+
+  async suggestionsPresets(presetId: string, options?: SuggestionOptions): Promise<SuggestionsResponse> {
+    return requestJson<SuggestionsResponse>('/suggestions/presets', {
+      method: 'POST',
+      body: JSON.stringify({
+        preset_id: presetId,
+        options: options ?? undefined,
+      }),
+    })
+  },
+
+  async aiIntent(text: string): Promise<Intent> {
+    const result = await requestJsonAllowErrors<Intent>('/ai/intent', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }, [422])
+
+    if (result.status === 422) {
+      const details = (result.errorJson || { detail: result.errorText }) as IntentParseErrorData
+      throw new IntentParseError('INTENT_PARSE_FAILED', details)
+    }
+
+    return result.data as Intent
+  },
+
+  async suggestionsFromIntent(intent: Intent, options?: SuggestionOptions): Promise<SuggestionsResponse> {
+    return requestJson<SuggestionsResponse>('/suggestions/from-intent', {
+      method: 'POST',
+      body: JSON.stringify({
+        intent,
+        options: options ?? undefined,
+      }),
+    })
+  },
+
+  async suggestionsPreview(plan: SuggestionPlan, options?: SuggestionOptions): Promise<PreviewResponse> {
+    const result = await requestJsonAllowErrors<PreviewResponse>('/suggestions/preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        plan,
+        options: options ?? undefined,
+      }),
+    }, [409])
+
+    if (result.status === 409) {
+      const details = (result.errorJson || { detail: result.errorText }) as ConflictErrorData
+      throw new ConflictError('SUGGESTION_CONFLICT', details)
+    }
+
+    return result.data as PreviewResponse
+  },
+
+  async suggestionsApply(
+    plan: SuggestionPlan,
+    options?: SuggestionOptions,
+    intentOrSignature?: Intent | { intent_signature: string }
+  ): Promise<ApplyResponse> {
+    const payload: Record<string, unknown> = { plan }
+    if (options) payload.options = options
+    if (intentOrSignature) {
+      if ('intent_signature' in intentOrSignature) {
+        payload.intent_signature = intentOrSignature.intent_signature
+      } else {
+        payload.intent = intentOrSignature
+      }
+    }
+
+    const result = await requestJsonAllowErrors<ApplyResponse>('/suggestions/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, [409])
+
+    if (result.status === 409) {
+      const details = (result.errorJson || { detail: result.errorText }) as ConflictErrorData
+      throw new ConflictError('SUGGESTION_CONFLICT', details)
+    }
+
+    return result.data as ApplyResponse
   },
 }
 
